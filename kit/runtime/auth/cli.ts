@@ -2,7 +2,10 @@
 // `scaffold check` reports local edits and `scaffold update` overwrites them. Change it in the kit instead.
 //
 // Service token commands of an app (src/auth/cli.ts calls runAuthCli with the app's roles):
-//   token create --name <name> --roles <a,b> [--days <n>]    prints the token ONCE — it cannot be shown again
+//   token create --name <name> [--roles <a,b>] [--days <n>]  prints the token ONCE — it cannot be shown again
+//                                                            no --roles (or --roles "") = a token that is authenticated
+//                                                            and holds no role: it passes requireAuth() (reads), never
+//                                                            requireRole() — the read-only token of a machine
 //   token revoke <id|name>
 //   token list
 // Exit codes: 0 ok · 1 failed · 2 usage.
@@ -19,7 +22,7 @@ export interface AuthCliDeps {
   out?: (line: string) => void
 }
 
-const USAGE = 'usage: token create --name <name> --roles <a,b> [--days <n>] | token revoke <id|name> | token list'
+const USAGE = 'usage: token create --name <name> [--roles <a,b>] [--days <n>] | token revoke <id|name> | token list   (no --roles = authenticated, no role: read-only)'
 
 export async function runAuthCli(argv: readonly string[], deps: AuthCliDeps): Promise<number> {
   const out = deps.out ?? ((line: string) => console.log(line))
@@ -42,7 +45,7 @@ export async function runAuthCli(argv: readonly string[], deps: AuthCliDeps): Pr
   if (verb === 'create') {
     roles = (rolesFlag ?? '').split(',').map((role) => role.trim()).filter(Boolean)
     const unknown = roles.filter((role) => !deps.roles.includes(role))
-    if (!name?.trim() || !roles.length || unknown.length || target) {
+    if (!name?.trim() || unknown.length || target) {
       out(unknown.length ? `unknown role(s): ${unknown.join(', ')} — this app has: ${deps.roles.join(', ')}` : USAGE)
       return 2
     }
@@ -63,7 +66,7 @@ export async function runAuthCli(argv: readonly string[], deps: AuthCliDeps): Pr
   try {
     if (verb === 'create') {
       const created = await createServiceToken(database.db, { name: name!.trim(), roles, expiresAt })
-      out(`created ${created.id}  name=${created.name}  roles=${created.roles.join(',')}  expires=${created.expiresAt ?? 'never'}`)
+      out(`created ${created.id}  name=${created.name}  roles=${created.roles.join(',') || '(none: authenticated, read-only)'}  expires=${created.expiresAt ?? 'never'}`)
       out(`token: ${created.token}`)
       out('Store it now — only its hash is kept, it cannot be shown again.')
       return 0

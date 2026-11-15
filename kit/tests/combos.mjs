@@ -169,6 +169,9 @@ async function fullModules(t) {
   if (!token) t.fail('token create did not print a token')
   const listed = await cli('dist/auth/cli.js', ['token', 'list'])
   if (!/active\s+name=gate-bot/.test(listed.out) || listed.out.includes(token)) t.fail('token list is wrong, or shows the token')
+  // a token without roles: authenticated, read-only (finding #5)
+  const readerToken = /^token: (\S+)$/m.exec((await cli('dist/auth/cli.js', ['token', 'create', '--name', 'gate-reader', '--days', '1'])).out)?.[1]
+  if (!readerToken) t.fail('token create without --roles did not print a token')
 
   const collector = await fakeCollector()
   const env = {
@@ -214,6 +217,11 @@ async function fullModules(t) {
       if (me.status !== 200 || me.body.data.kind !== 'service' || me.body.data.roles.join() !== 'editor') t.fail(`/me with a service token: ${me.status} ${JSON.stringify(me.body)}`)
       if ((await call('/api/v1/items', post(bearer, { name: 'By the token' }))).status !== 201) t.fail('the service token could not create an item')
       if ((await call('/api/v1/me', { headers: { authorization: `Bearer ${token.slice(0, -2)}xx` } })).status !== 401) t.fail('a tampered token was accepted')
+      const reader = { authorization: `Bearer ${readerToken}` }
+      const readerMe = await call('/api/v1/me', { headers: reader })
+      if (readerMe.status !== 200 || readerMe.body.data.kind !== 'service' || readerMe.body.data.roles.length !== 0) t.fail(`/me with a role-less token: ${readerMe.status} ${JSON.stringify(readerMe.body)}`)
+      if ((await call('/api/v1/items', { headers: reader })).status !== 200) t.fail('the role-less token could not read')
+      if ((await call('/api/v1/items', post(reader, { name: 'By the reader' }))).status !== 403) t.fail('the role-less token could write')
       // security baseline
       const h = (await call('/health/live')).headers
       if (h.get('x-content-type-options') !== 'nosniff' || h.get('x-frame-options') !== 'DENY' || !/default-src 'none'/.test(h.get('content-security-policy') ?? '')) t.fail('secure headers are missing on /health/live')

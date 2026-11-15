@@ -17,10 +17,13 @@ forward-auth      X-Authentik-* headers added by the reverse proxy after the ide
   Signed-in users are mirrored into `users` (written and audited only when something changed); the audit actor of
   every write is the caller's subject.
 - `GET /api/v1/me` returns the caller (`subject`, `name`, `email`, `roles`, `kind`), 401 when nobody is signed in.
-- Service tokens (`service_tokens`: sha256 only, roles, expiry, `revokedAt`, `lastUsedAt`):
+- Service tokens (`service_tokens`: sha256 only, roles, expiry, `revokedAt`, `lastUsedAt`). A token created without
+  `--roles` is authenticated and holds no role: it may call every `requireAuth()` route (reads) and no
+  `requireRole()` route — the token for a machine that only reads:
 
 ```bash
 npm run auth:token -- create --name nightly-sync --roles editor --days 90   # prints the token ONCE
+npm run auth:token -- create --name og-preview --days 365                   # no --roles: authenticated, read-only
 npm run auth:token -- list
 npm run auth:token -- revoke nightly-sync                                   # by name or id; effective at once
 node dist/auth/cli.js token list                                            # in a built image

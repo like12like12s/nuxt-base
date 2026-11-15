@@ -261,11 +261,30 @@ describe.each(DIALECTS)('service tokens (%s)', (dialect) => {
     expect(await cli('token', 'list')).toBe(0)
     expect(lines.join('\n')).toMatch(/revoked {2}name=deploy-bot/)
 
-    for (const bad of [[], ['token'], ['token', 'create'], ['token', 'create', '--name', 'x'], ['token', 'create', '--name', 'x', '--roles', 'root'],
+    for (const bad of [[], ['token'], ['token', 'create'], ['token', 'create', '--roles', 'admin'], ['token', 'create', '--name', 'x', '--roles', 'root'],
       ['token', 'create', '--name', 'x', '--roles', 'admin', '--days', '0'], ['token', 'revoke'], ['token', 'list', 'extra'], ['user', 'list'], ['token', 'create', '--nope']]) {
       expect(await cli(...bad), bad.join(' ')).toBe(2)
     }
     expect(await database.db.selectFrom('service_tokens').select('id').execute()).toHaveLength(1)
+  })
+
+  // Finding #5: reads need no role (requireAuth), so a machine that only reads must be able to get a token.
+  it('the CLI creates a token with no roles — omitted or empty --roles — and says what it is', async () => {
+    const database = await testDb(dialect)
+    const lines: string[] = []
+    const cli = (...argv: string[]) => {
+      lines.length = 0
+      return runAuthCli(argv, { url: database.url, roles: ROLES, out: (line) => lines.push(line) })
+    }
+    for (const [name, extra] of [['reader-a', []], ['reader-b', ['--roles', '']], ['reader-c', ['--roles', ' , ']]] as [string, string[]][]) {
+      expect(await cli('token', 'create', '--name', name, ...extra), name).toBe(0)
+      expect(lines.join('\n'), name).toMatch(/roles=\(none: authenticated, read-only\)/)
+      const check = await verifyServiceToken(database.db, /^token: (\S+)$/m.exec(lines.join('\n'))![1]!)
+      expect(check, name).toMatchObject({ ok: true, token: { name, roles: [] } })
+    }
+    // an unknown role is still refused — "no role" is only what was asked for, never a typo that fell through
+    expect(await cli('token', 'create', '--name', 'typo', '--roles', 'reader')).toBe(2)
+    expect(lines.join('\n')).toMatch(/unknown role\(s\): reader/)
   })
 })
 
