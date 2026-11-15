@@ -250,7 +250,7 @@ export function compose(kit, input) {
       if (dir === undefined) continue // this kind has no such part
       const a = acc(dir)
       mergePackage(a.pkg, c.package)
-      for (const e of c.env ?? []) a.env.set(e.key, { ...a.env.get(e.key), ...e })
+      for (const { when: only, ...e } of c.env ?? []) if (matches(only, when)) a.env.set(e.key, { ...a.env.get(e.key), ...e })
       for (const b of c.backup ?? []) if (matches(b.when, when)) a.backup.push(b)
       for (const f of c.files ?? []) if (matches(f.when, when)) a.files.push({ ...f, unit })
       for (const f of c.locked ?? []) if (matches(f.when, when)) a.locked.push(f)
@@ -258,7 +258,11 @@ export function compose(kit, input) {
       a.nuxtConfig.push(...(c.nuxtConfig ?? []))
       gitignore.push(...(c.gitignore ?? []))
       for (const u of [].concat(c.usage ?? [])) usage.push({ file: join(unit.dir, u), dir })
-      next.push(...(c.next ?? []))
+      // A `next` line is a string, or { text, when } for one that only applies to some selections.
+      for (const line of c.next ?? []) {
+        if (typeof line === 'string') next.push(line)
+        else if (matches(line.when, when)) next.push(line.text)
+      }
     }
   }
 

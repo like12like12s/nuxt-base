@@ -10,6 +10,21 @@
   only origin used in `og:url`, canonical and a site-relative `og:image`. The request's `Host` /
   `X-Forwarded-Host` are client-controlled and are never believed (only `nuxt dev` uses `Host`); without the
   setting those three tags are left out and the preview has just its title and description.
+<!-- @kit:if kind:fullstack -->
+- Record pages (`/orders/<id>`): listed in `RECORDS` of `server/og.ts` (`scaffold add resource` adds its detail
+  page), previewed with the record's name. The lookup is made by the UI **server** through
+  `server/utils/server-api.ts` with the service token in `API_SERVICE_TOKEN` — create it without roles (read-only):
+  `npm run auth:token -- create --name og-preview --days 365` in the API. Without the token, or when the API does
+  not answer, the page gets the generic preview.
+<!-- @kit:if auth -->
+- **Previews and sign-in.** A crawler cannot pass single sign-on: behind a forward-auth proxy its request is
+  redirected to the login page and it never sees these tags. Previews then only work for callers that reach the UI
+  without that redirect (an internal unfurler, a caller the proxy lets through for page URLs). Letting crawlers
+  through is a proxy decision — only page URLs, never `/api/**` — and what they may learn is exactly what
+  `resolveOg` returns: titles and descriptions of records. Do not list a collection in `RECORDS` whose names are
+  confidential.
+<!-- @kit:end -->
+<!-- @kit:end -->
 - Only URLs that `resolveOg` knows get a title of their own; every other URL gets the site's preview. Do not derive a
   title from the path — whoever shares a link chooses it.
 - It runs in the server's HTML renderer, so it is the same on the Node server (container, pm2) and on Cloudflare

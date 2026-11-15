@@ -299,6 +299,26 @@ async function fullModules(t) {
     if (made.status !== 201 || list.status !== 200 || list.body.meta.total !== 1) t.fail(`generated resource: create ${made.status}, list ${list.status} ${JSON.stringify(list.body)}`)
     const doc = await call('/openapi.json')
     if (!doc.body.paths['/api/v1/order-lines/{id}']) t.fail('/openapi.json does not document the generated resource')
+
+    // og + auth (finding #6): a crawler has no session, so the UI SERVER reads the record with its own read-only
+    // service token. Built UI + built API, a crawler user agent, the record's page.
+    if (t.uiDir && t.plan.modules.includes('og')) {
+      t.begin('og + auth: the link preview of a record page is read by the UI server with a role-less service token')
+      const up = t.port + 8
+      const ui = `http://127.0.0.1:${up}`
+      const preview = async (token) => {
+        let html = ''
+        await t.withServer('npm', ['run', 'serve'], { cwd: t.uiDir, group: true, extraEnv: { PORT: String(up), HOST: '127.0.0.1', NITRO_PORT: String(up), NITRO_HOST: '127.0.0.1', API_URL: base, API_SERVICE_TOKEN: token, NUXT_PUBLIC_SITE_URL: 'https://app.example.com' } }, async () => {
+          await t.waitFor(`${ui}/`)
+          html = await (await fetch(`${ui}/order-lines/${made.body.data.id}`, { headers: { 'user-agent': 'Twitterbot/1.0' }, signal: AbortSignal.timeout(8000) })).text()
+        })
+        return /<meta property="og:title" content="([^"]*)">/.exec(html)?.[1] ?? null
+      }
+      const withToken = await preview(readerToken)
+      if (!withToken?.startsWith('Line 1 · ')) t.fail(`og:title of the record page with the service token: ${withToken}`)
+      const without = await preview('')
+      if (!without || without.includes('Line 1')) t.fail(`without a token the record's name must not be in the preview (the API refuses anonymous): ${without}`)
+    }
   })
   const lockEnv = { env: { JOB_LOCK_DIR: join(t.tmp, 'locks') } }
   const ran = await cli('dist/jobs/run.js', ['nightly-sync'], lockEnv)

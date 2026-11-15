@@ -249,8 +249,15 @@ export async function cmdAdd(kit, opts) {
   // Patches insert lines into app-owned files at an anchor comment (`// kit:anchor <name>`) the scaffold left there.
   // Everything is computed first: a missing anchor stops the command before a single byte is written.
   const patched = new Map()
+  const skipped = []
   for (const p of patches) {
     const abs = inside(dir, p.path)
+    // An `optional` patch is a convenience in a file an older project may not have in that shape: without the file
+    // or the anchor it is left out (and reported in `skipped`) instead of stopping the whole command.
+    if (p.optional && (!existsSync(abs) || !(patched.get(p.path) ?? readFileSync(abs, 'utf8')).split('\n').some((line) => new RegExp(`(//|#|<!--)\\s*kit:anchor ${escapeRe(p.anchor)}(\\s|$)`).test(line)))) {
+      skipped.push({ path: p.path, anchor: p.anchor, insert: p.insert })
+      continue
+    }
     if (!patched.has(p.path)) {
       if (!existsSync(abs)) throw usageError(`add ${type} ${name}: ${p.path} is missing — it is where the ${p.anchor} anchor lives`, 'anchor_missing')
       patched.set(p.path, readFileSync(abs, 'utf8'))
@@ -271,6 +278,9 @@ export async function cmdAdd(kit, opts) {
   for (const [path, content] of patched) writeFileUnder(dir, path, content)
   return {
     exit: EXIT.OK,
-    result: { ok: true, dir, type, name, generator: found.unit.name, files: files.map((f) => f.path), patched: [...patched.keys()], next: out.next ?? [] },
+    result: {
+      ok: true, dir, type, name, generator: found.unit.name, files: files.map((f) => f.path), patched: [...patched.keys()],
+      next: [...(out.next ?? []), ...skipped.map((s) => `${s.path}: no \`kit:anchor ${s.anchor}\` there — if you want it, add by hand: ${s.insert.trim()}`)],
+    },
   }
 }

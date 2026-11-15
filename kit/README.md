@@ -192,7 +192,7 @@ A kind, a module and a deploy preset are all **units** with the same descriptor.
   "contributes": {
     "api": {
       "package": { "dependencies": {}, "devDependencies": {}, "scripts": {} },   // merged into the part's package.json
-      "env": [{ "key": "API_TOKEN", "required": true, "secret": true, "example": "", "description": "…" }],
+      "env": [{ "key": "API_TOKEN", "required": true, "secret": true, "example": "", "description": "…" }],   // + "generated": true, "when": {…}
       "files": [{ "from": "files", "to": "", "when": { "kind": ["api"] } }],      // file or directory, relative to the unit; rendered
       "locked": [{ "from": "runtime/api/env.ts", "to": "src/kit/api/env.ts" }],   // relative to the kit root; copied verbatim + hashed
       "backup": [{ "engine": "sqlite", "path": "data/{{kit.name}}.db", "envKey": "DATABASE_URL", "when": { "db": ["sqlite"] } }],  // -> `backup` of `new --json`
@@ -200,7 +200,8 @@ A kind, a module and a deploy preset are all **units** with the same descriptor.
       "nuxtConfig": ["nitro: { preset: 'cloudflare-pages' },"],                   // lines added to the UI's defineNuxtConfig
       "gitignore": ["dist/"],
       "usage": "usage.md",                                                         // section appended to .memory/docs/guides/usage.md
-      "next": ["one line shown to the user after `new`"]
+      "next": ["one line shown to the user after `new`",                           // or { "text", "when" } for some selections only
+               { "when": { "with": ["auth"] }, "text": "…" }]
     },
     "project": {}, "ui": {}
   },
@@ -257,9 +258,12 @@ default-exports `({ name, type, dir, part, parts, manifest, project }) => ({ fil
 
 ```
 files    [{ path, content, part? }]          new files; refused when one exists (exit 3)
-patches  [{ path, anchor, insert, part? }]   lines inserted into an existing app-owned file, above the line that holds
+patches  [{ path, anchor, insert, part?, optional? }]
+                                             lines inserted into an existing app-owned file, above the line that holds
                                              the comment `kit:anchor <anchor>`, with that line's indent. A missing
-                                             anchor is exit 2 (`anchor_missing`) and the message says what to add by hand
+                                             anchor is exit 2 (`anchor_missing`) and the message says what to add by
+                                             hand — unless the patch is `optional` (a convenience older projects may
+                                             lack the anchor for): then it is left out and named in `next[]`
 next     ["…"]                               what the developer does next, in order
 ```
 
@@ -385,6 +389,10 @@ og        per-URL title / description / og:* / twitter:* / canonical for crawler
           og:url / canonical / site-relative images come from NUXT_PUBLIC_SITE_URL only — the request's Host and
           X-Forwarded-Host are never believed (without the setting those tags are left out), and the path cannot
           select another host. Unlisted URLs get the site preview, never a title derived from the path.
+          fullstack: `RECORDS` in server/og.ts maps a detail page (`/orders/<id>`, added by `add resource`) to its
+          API collection; the lookup is made by the UI server through server/utils/server-api.ts with the
+          role-less service token in API_SERVICE_TOKEN — a crawler has no session and the API refuses anonymous
+          callers. With `auth`, `new` says in `next[]` that crawlers cannot pass single sign-on.
 jobs      src/jobs/<name>.ts + `npm run job -- <name>` / `node dist/jobs/run.js <name>`: a lock per job (no
           overlap, atomic across processes and hosts sharing JOB_LOCK_DIR; a dead owner or a passed deadline frees it), exit 0 ok · 1 failed · 2 unknown · 3 already running ·
           4 timed out, one JSON line at start and end, audit actor `job:<name>` and no audit row without a change.

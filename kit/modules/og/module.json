@@ -7,13 +7,17 @@
   "contributes": {
     "ui": {
       "env": [
-        { "key": "NUXT_PUBLIC_SITE_URL", "required": false, "secret": false, "example": "", "description": "Public origin of the site (https://app.example.com) used in og:url / canonical / og:image. Set it on every deployed instance: empty = those tags are left out (the request host is never believed)" }
+        { "key": "NUXT_PUBLIC_SITE_URL", "required": false, "secret": false, "example": "", "description": "Public origin of the site (https://app.example.com) used in og:url / canonical / og:image. Set it on every deployed instance: empty = those tags are left out (the request host is never believed)" },
+        { "key": "API_SERVICE_TOKEN", "required": false, "secret": true, "example": "", "when": { "kind": ["fullstack"] }, "description": "Service token the UI SERVER reads the API with for link previews of record pages (server/utils/server-api.ts). Create it in the API without roles (read-only): npm run auth:token -- create --name og-preview --days 365. Empty = record pages get the generic preview" }
       ],
-      "files": [{ "from": "files", "to": "" }],
+      "files": [{ "from": "files", "to": "" }, { "from": "files-fullstack", "to": "", "when": { "kind": ["fullstack"] } }],
       "locked": [{ "from": "runtime/og/og.ts", "to": "server/kit/og.ts" }],
       "nuxtConfig": ["runtimeConfig: { public: { siteUrl: '' } },"],
       "usage": "usage.md",
-      "next": ["set NUXT_PUBLIC_SITE_URL on every deployed instance — without it link previews carry no og:url / canonical / site-relative image"]
+      "next": [
+        "set NUXT_PUBLIC_SITE_URL on every deployed instance — without it link previews carry no og:url / canonical / site-relative image",
+        { "when": { "with": ["auth"] }, "text": "link previews + sign-in: a crawler cannot pass single sign-on — it is redirected to the login page and never sees a preview unless the proxy lets crawler requests for page URLs through without a session; and the API answers 401 to it, so the UI server reads records with its own read-only service token ({{kit.uiDir}}: API_SERVICE_TOKEN; create it with `npm run auth:token -- create --name og-preview --days 365` in the API). See \"Link previews\" in .memory/docs/guides/usage.md" }
+      ]
     }
   }
 }

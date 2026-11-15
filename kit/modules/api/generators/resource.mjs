@@ -358,6 +358,11 @@ describe('${n.kebab}', () => {
     })
   }
 
+  // Link preview of the detail page (og module, fullstack): /<name>/<id> -> the record's name, read by the UI server.
+  if (hasUi && manifest.modules.includes('og')) {
+    patches.push({ part: 'ui', path: 'server/og.ts', anchor: 'og-records', insert: `'/${n.kebab}': '/api/v1/${n.kebab}',`, optional: true })
+  }
+
   if (hasUi) {
     // The UI of the resource, in the project's one language: a list page with a create form and a detail page with
     // edit + soft delete. Forms live in the layer's Modal, the delete question in its ConfirmModal; a 400 from the API
