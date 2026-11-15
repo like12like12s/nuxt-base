@@ -103,6 +103,20 @@
         }
       ],
       "usage": "usage-ui.md"
+    },
+    "project": {
+      "files": [
+        {
+          "from": "../../playbooks/add-resource.md",
+          "to": "dot.memory/docs/guides/playbook-add-resource.md"
+        }
+      ]
+    }
+  },
+  "generators": {
+    "resource": {
+      "module": "generators/resource.mjs",
+      "part": "api"
     }
   }
 }

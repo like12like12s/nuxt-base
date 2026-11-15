@@ -44,14 +44,14 @@ describe('add — generator dispatch', () => {
     const dir = project('nuxt-app')
     const r = cli(['add', 'page', 'order-history', '--dir', dir, '--json'])
     expect(r.status).toBe(0)
-    expect(r.json).toMatchObject({ ok: true, type: 'page', name: 'order-history', generator: 'nuxt-app', files: ['app/pages/order-history.vue'] })
+    expect(r.json).toMatchObject({ ok: true, type: 'page', name: 'order-history', generator: 'nuxt-app', files: ['app/pages/order-history.vue', 'tests/e2e/order-history.spec.ts'] })
     expect(read(dir, 'app/pages/order-history.vue')).toContain('Order History')
   })
 
   it('fullstack: the page lands in the ui part; the default dir is the cwd', () => {
     const dir = project('fullstack')
     const r = cli(['add', 'page', 'reports', '--json'], { cwd: dir })
-    expect(r.json.files).toEqual(['ui/app/pages/reports.vue'])
+    expect(r.json.files).toEqual(['ui/app/pages/reports.vue', 'ui/tests/e2e/reports.spec.ts'])
     expect(read(dir, 'ui/app/pages/reports.vue')).toContain('Reports')
   })
 

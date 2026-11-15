@@ -8,6 +8,9 @@ export interface ItemsTable extends StandardColumns {
   quantity: number
 }
 
+// kit:anchor tables — `scaffold add resource` adds its table interface above this line
+
 export interface Schema extends BaseTables {
   items: ItemsTable
+  // kit:anchor schema — and its entry above this line
 }

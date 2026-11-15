@@ -5,8 +5,10 @@
 import { baseMigration } from '../../kit/db/schema.js'
 import type { Migrations } from '../../kit/db/migrate.js'
 import { items } from './0002_items.js'
+// kit:anchor migration-imports — `scaffold add resource` adds its import above this line
 
 export const migrations: Migrations = {
   '0001_base': baseMigration,
   '0002_items': items,
+  // kit:anchor migrations — and its migration above this line (next free 4-digit sequence)
 }
