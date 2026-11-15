@@ -8,12 +8,12 @@ export default function generate({ name, manifest }) {
   const page = `<template>
   <main class="mx-auto max-w-3xl space-y-6 p-6">
     <h1 class="text-xl font-semibold text-fg" data-test="title">${title(name)}</h1>
-    <AsyncState :pending="pending" :error="error" :empty="!rows.length" @retry="load">
+    <AsyncState :pending="pending" :error="error" :empty="!rows.length" :retry="load">
       <template #empty>
         <EmptyState title="Nothing here yet" description="Replace this with the page content." />
       </template>
       <Card>
-        <ul class="divide-y divide-border">
+        <ul class="divide-y divide-line">
           <li v-for="row in rows" :key="row" class="py-2 text-sm text-fg">{{ row }}</li>
         </ul>
       </Card>

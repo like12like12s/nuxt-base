@@ -146,7 +146,7 @@ describe('add page', () => {
     const r = add(dir, 'page', 'order-history')
     expect(r.json.files).toEqual(['app/pages/order-history.vue', 'tests/e2e/order-history.spec.ts'])
     const page = read(dir, 'app/pages/order-history.vue')
-    for (const text of ['<AsyncState :pending="pending" :error="error" :empty="!rows.length" @retry="load">', "useSiteHead({ title: 'Order History' })", 'onMounted(load)']) expect(page).toContain(text)
+    for (const text of ['<AsyncState :pending="pending" :error="error" :empty="!rows.length" :retry="load">', "useSiteHead({ title: 'Order History' })", 'onMounted(load)']) expect(page).toContain(text)
     const spec = read(dir, 'tests/e2e/order-history.spec.ts')
     expect(spec).toContain("await page.goto('/order-history')")
     expect(spec).toContain('expect(errors).toEqual([])')
@@ -155,6 +155,45 @@ describe('add page', () => {
     const withAuth = project(['--kind', 'fullstack', '--with', 'auth'])
     expect(add(withAuth, 'page', 'reports').json.files).toEqual(['ui/app/pages/reports.vue', 'ui/tests/e2e/reports.spec.ts'])
     expect(read(withAuth, 'ui/tests/e2e/reports.spec.ts')).toContain("page.route('**/api/v1/me'")
+  })
+})
+
+// Finding #3 of the first real use: the generated pages listened for a `retry` event AsyncState never emits (so the
+// error state had no retry button) and used a colour utility the layer does not define.
+describe('generated pages only use what the layer has', () => {
+  const layer = join(__dirname, '../../app')
+  const tokens = new Set([...readFileSync(join(layer, 'assets/css/base.css'), 'utf8').matchAll(/--color-([a-z0-9-]+):/g)].map((m) => m[1]))
+  const NOT_A_COLOUR = /^(?:xs|sm|base|lg|xl|\d+xl|left|center|right|x|y|\d+|t|b|l|r)$/
+  const pages = () => {
+    const dir = project(['--kind', 'fullstack', '--with', 'api,db'])
+    expect(add(dir, 'resource', 'order-lines').status).toBe(0)
+    expect(add(dir, 'page', 'reports').status).toBe(0)
+    return Object.keys(snapshot(join(dir, 'ui/app/pages'))).map((rel) => [rel, read(dir, `ui/app/pages/${rel}`)] as const)
+  }
+
+  it('retry is passed to AsyncState as the prop it declares, never as an event listener', () => {
+    const asyncState = readFileSync(join(layer, 'components/AsyncState.vue'), 'utf8')
+    expect(asyncState).toMatch(/retry\?: \(\) => void/)
+    expect(asyncState).not.toContain('defineEmits')
+    for (const [rel, text] of pages()) {
+      expect(text, rel).not.toMatch(/@retry=/)
+      if (text.includes('<AsyncState')) expect(text, rel).toMatch(/<AsyncState[^>]*:retry="load"/)
+    }
+  })
+
+  it('every colour utility names a token of the layer (base.css)', () => {
+    for (const [rel, text] of pages()) {
+      const used = [...text.matchAll(/\b(?:divide|border|bg|text|ring)-([a-z][a-z0-9-]*)/g)].map((m) => m[1]!).filter((name) => !NOT_A_COLOUR.test(name))
+      expect(used.filter((name) => !tokens.has(name)), rel).toEqual([])
+    }
+  })
+
+  it('the resource list page comes with an e2e test that clicks retry', () => {
+    const dir = project(['--kind', 'fullstack', '--with', 'api,db'])
+    add(dir, 'resource', 'order-lines')
+    const spec = Object.keys(snapshot(join(dir, 'ui/tests/e2e'))).map((rel) => read(dir, `ui/tests/e2e/${rel}`)).join('\n')
+    expect(spec).toMatch(/getByRole\('alert'\)/)
+    expect(spec).toMatch(/alert\.getByRole\('button'\)\.click\(\)/)
   })
 })
 

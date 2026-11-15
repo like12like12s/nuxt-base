@@ -360,12 +360,12 @@ describe('${n.kebab}', () => {
       content: `<template>
   <main class="mx-auto max-w-3xl space-y-6 p-6">
     <h1 class="text-xl font-semibold text-fg" data-test="title">${n.title}</h1>
-    <AsyncState :pending="pending" :error="error" :empty="!rows.length" @retry="load">
+    <AsyncState :pending="pending" :error="error" :empty="!rows.length" :retry="load">
       <template #empty>
         <EmptyState title="No ${n.title.toLowerCase()} yet" description="Records created through the API show up here." />
       </template>
       <Card>
-        <ul class="divide-y divide-border" data-test="${n.kebab}-list">
+        <ul class="divide-y divide-line" data-test="${n.kebab}-list">
           <li v-for="row in rows" :key="row.id" class="flex items-center justify-between py-2 text-sm">
             <span class="text-fg">{{ row.name }}</span>
             <span class="text-muted">{{ row.createdAt.slice(0, 10) }}</span>
@@ -427,6 +427,22 @@ test('${n.kebab}: empty and error states', async ({ page }) => {
   await stubApi(page, { ...me, 'GET /api/v1/${n.kebab}': failure(500, 'INTERNAL', 'Internal server error') })
   await page.reload()
   await expect(page.getByText('Internal server error (trace e2e-stub)')).toBeVisible()
+})
+
+test('${n.kebab}: the retry button of the error state loads the list again', async ({ page }) => {
+  let healthy = false
+  const { calls } = await stubApi(page, {
+    ...me,
+    'GET /api/v1/${n.kebab}': () => (healthy ? list([{ id: '1', name: 'Back again', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }]) : failure(500, 'INTERNAL', 'Internal server error')),
+  })
+  await page.goto('/${n.kebab}')
+  const alert = page.getByRole('alert')
+  await expect(alert).toContainText('Internal server error')
+  healthy = true
+  await alert.getByRole('button').click()
+  await expect(page.getByTestId('${n.kebab}-list')).toContainText('Back again')
+  await expect(alert).toHaveCount(0)
+  expect(calls.filter((call) => call.path === '/api/v1/${n.kebab}')).toHaveLength(2)
 })
 `,
     })
