@@ -1,0 +1,47 @@
+/* nuxt-base — Tailwind 4 preset + design tokens + global base styles.
+ * Loaded by the layer's nuxt.config. Consumers add their own css AFTER (nuxt.config `css`) and may redefine
+ * any token in an `@theme` block of their own. Do not copy this file into an app. */
+@import "tailwindcss";
+
+/* The layer may live in node_modules/.c12/… where Tailwind does not auto-scan — register its components explicitly. */
+@source "../../components";
+
+/* `dark:` variants are class-driven (html.dark, set by the layer's head defaults) instead of prefers-color-scheme,
+ * so internal tools are always dark and public sites can toggle. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Design tokens — semantic names on top of the Tailwind zinc/emerald scale (UI standard v1, dark zinc default).
+ * Utilities: bg-bg, bg-surface, bg-surface-2, text-fg, text-muted, text-faint, border-line, bg-accent, text-accent-fg … */
+@theme {
+  --color-bg: var(--color-zinc-950);
+  --color-surface: var(--color-zinc-900);
+  --color-surface-2: var(--color-zinc-800);
+  --color-line: var(--color-zinc-800);
+  --color-line-strong: var(--color-zinc-700);
+  --color-fg: var(--color-zinc-100);
+  --color-fg-2: var(--color-zinc-300);
+  --color-muted: var(--color-zinc-400);
+  --color-faint: var(--color-zinc-500);
+  --color-accent: var(--color-emerald-700);     /* emerald-700 on zinc-100 = 4.99:1 AA */
+  --color-accent-hover: var(--color-emerald-800);
+  --color-accent-fg: var(--color-zinc-100);
+  --color-danger: var(--color-red-700);
+  --color-danger-fg: var(--color-zinc-100);
+  --color-ring: var(--color-emerald-600);
+  --radius-ui: 0.5rem;        /* rounded-ui — buttons, inputs, cards */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Thai", "Noto Sans", sans-serif;
+}
+
+@layer base {
+  html { color-scheme: dark; }
+  body { @apply bg-bg text-fg-2 antialiased; }
+  /* Scrollbar — canonical (was ui-kit/shared/base.css): thin 6px, zinc-700 thumb, hover zinc-600, 3px radius, transparent track */
+  * { scrollbar-width: thin; scrollbar-color: var(--color-zinc-700) transparent; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--color-zinc-700); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--color-zinc-600); }
+  ::-webkit-scrollbar-corner { background: transparent; }
+  :focus-visible { outline: 2px solid var(--color-ring); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { *, ::before, ::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+}

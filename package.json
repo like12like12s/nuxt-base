@@ -1,0 +1,73 @@
+{
+  "name": "@like12like12s/nuxt-base",
+  "version": "0.1.0",
+  "description": "Nuxt 4 base layer: Tailwind 4 preset + design tokens, core UI components, async/empty/error patterns, head/OG defaults, auth hook point. Extend it, never copy it.",
+  "type": "module",
+  "main": "./nuxt.config.ts",
+  "private": true,
+  "scripts": {
+    "dev": "nuxt dev playground --port 3517",
+    "build": "nuxt build playground",
+    "prepare": "nuxt prepare playground",
+    "typecheck": "nuxt typecheck playground",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
+    "test:templates": "scripts/sync-templates.sh --check",
+    "test": "npm run build && npm run test:unit && npm run test:e2e && npm run test:templates",
+    "gate": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.3.5",
+    "lucide-vue-next": "^1.0.0",
+    "tailwindcss": "^4.3.5"
+  },
+  "devDependencies": {
+    "@nuxt/test-utils": "^4.4.0",
+    "@playwright/test": "^1.65.1",
+    "@vue/test-utils": "^2.6.0",
+    "happy-dom": "^21.0.4",
+    "nuxt": "^4.6.4",
+    "typescript": "^5.9.0",
+    "vitest": "^5.1.0",
+    "vue": "^3.5.45",
+    "vue-router": "^4.6.0",
+    "vue-tsc": "^3.2.0"
+  },
+  "allowScripts": {
+    "esbuild@0": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      [
+        null,
+        null,
+        "true"
+      ]
+    ]
+  }
+}
