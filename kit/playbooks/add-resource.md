@@ -22,8 +22,19 @@ tests/<name>.spec.ts                    CRUD, validation, soft delete, audit
 
 and registers it at the `kit:anchor` comments: `src/app.ts`, `src/db/migrations/index.ts`, `src/db/schema.ts`,
 `tests/helpers.ts` (table cleanup) — plus, with the auth module, the route rows in the matrix of `tests/auth.spec.ts`.
-In a fullstack project it also writes `ui/app/pages/<name>.vue` (a list page on the AsyncState pattern) and
-`ui/tests/e2e/<name>.spec.ts`. An anchor that was removed stops the command and prints what to add by hand.
+An anchor that was removed stops the command and prints what to add by hand.
+
+In a fullstack project it also writes the resource's pages, in the project's language:
+
+```
+ui/app/pages/<name>/index.vue       /<name>: the list (AsyncState: loading -> error with retry -> empty -> rows),
+                                    an "add" button and the create form in a Modal
+ui/app/pages/<name>/[id].vue        /<name>/<id>: the record, an edit form in a Modal, soft delete behind a ConfirmModal
+ui/tests/e2e/<name>.spec.ts         list, empty / error / retry, create with a per-field 400, edit, delete, 404
+```
+
+A 400 from the API is shown at the field it is about: `apiProblem(res.error).fields.<field>` (locked
+`app/utils/api-error.ts`, from the `details` of the error body); anything else as one line with the trace id.
 
 ## What you fill in
 
@@ -36,6 +47,10 @@ In a fullstack project it also writes `ui/app/pages/<name>.vue` (a list page on 
    already keeps `name` unique among live rows — in the database (generated `liveName` column + unique index, see
    `liveValue` in `src/kit/db/schema.ts`), answered as `409 CONFLICT`. Use the same pattern for any other unique
    field; never check-then-insert. If names need not be unique, remove the column, the index and the 409 mapping.
+
+4. Fullstack — every field you added, in both pages: an entry in `form` (a `ref({...})`, not `reactive()`), an input
+   with its `problem.fields.<field>` line in the form, the field in the request `body`, a row in the detail list —
+   and the same in the stubs and assertions of `ui/tests/e2e/<name>.spec.ts`.
 
 ## Then, in this order
 

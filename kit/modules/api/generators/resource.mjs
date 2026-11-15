@@ -1,10 +1,11 @@
 // `scaffold add resource <name>` — a new resource done the standard way (the shape of src/resources/items/):
 // migration + table type, zod schemas, repository (soft delete, audited writes), contract-first routes with their
-// auth declarations (when the auth module is installed), tests, and — in a fullstack project — a list page with its
-// e2e spec. It registers everything at the `kit:anchor` comments. The contract (openapi.json) and the typed client
+// auth declarations (when the auth module is installed), tests, and — in a fullstack project — its pages (list with a
+// create form, detail with edit + soft delete) with an e2e spec. It registers everything at the `kit:anchor` comments. The contract (openapi.json) and the typed client
 // are derived files: the generator is pure, so regenerating them is the first step in `next`.
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { langOf, text } from '../../../lib/i18n.mjs'
 import { names } from '../../../lib/names.mjs'
 
 function nextSequence(apiDir) {
@@ -358,45 +359,105 @@ describe('${n.kebab}', () => {
   }
 
   if (hasUi) {
+    // The UI of the resource, in the project's one language: a list page with a create form and a detail page with
+    // edit + soft delete. Forms live in the layer's Modal, the delete question in its ConfirmModal; a 400 from the API
+    // is shown per field (apiProblem, app/utils/api-error.ts). Form state is a ref({...}) — with reactive() the
+    // v-model inside a Modal slot does not type-check.
+    const t = text(langOf(manifest))
+    const k = n.kebab
+    const what = n.oneTitle.toLowerCase()
+    const many = n.title.toLowerCase()
+    const sample = `{ id: '1', name: 'First', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }`
+    const form = (testId, submit, heading, action) => `      <form class="space-y-4" data-test="${testId}" @submit.prevent="${submit}">
+        <h2 class="text-base font-semibold text-fg">${heading}</h2>
+        <Field label="${t.name}">
+          <Input v-model="form.name" data-test="${k}-name" />
+          <p v-if="problem?.fields.name" class="mt-1 text-xs text-red-300" data-test="${k}-name-error">{{ problem.fields.name }}</p>
+        </Field>
+        <!-- anything the API refused that is not one of the fields above (a conflict, a field without an input yet) -->
+        <p v-if="problem && !problem.fields.name" role="alert" class="text-sm text-red-300" data-test="${k}-form-error">{{ problem.text }}</p>
+        <div class="flex justify-end gap-2">
+          <Btn variant="secondary" :disabled="saving" data-test="${k}-cancel" @click="${action} = false">${t.cancel}</Btn>
+          <Btn type="submit" :disabled="saving" data-test="${k}-save">${submit === 'create' ? t.create : t.save}</Btn>
+        </div>
+      </form>`
     files.push({
       part: 'ui',
-      path: `app/pages/${n.kebab}.vue`,
+      path: `app/pages/${k}/index.vue`,
       content: `<template>
   <main class="mx-auto max-w-3xl space-y-6 p-6">
-    <h1 class="text-xl font-semibold text-fg" data-test="title">${n.title}</h1>
-    <AsyncState :pending="pending" :error="error" :empty="!rows.length" :retry="load">
+    <header class="flex items-center justify-between gap-4">
+      <h1 class="text-xl font-semibold text-fg" data-test="title">${n.title}</h1>
+      <Btn data-test="${k}-new" @click="openCreate">${t.add}</Btn>
+    </header>
+    <AsyncState :pending="pending" :error="error" :empty="!rows.length" :has-data="!!rows.length" :retry="load">
       <template #empty>
-        <EmptyState title="No ${n.title.toLowerCase()} yet" description="Records created through the API show up here." />
+        <EmptyState title="${t.noneYet(many)}" description="${t.createFirst.replaceAll('"', '&quot;')}" />
       </template>
       <Card>
-        <ul class="divide-y divide-line" data-test="${n.kebab}-list">
+        <ul class="divide-y divide-line" data-test="${k}-list">
           <li v-for="row in rows" :key="row.id" class="flex items-center justify-between py-2 text-sm">
-            <span class="text-fg">{{ row.name }}</span>
+            <NuxtLink :to="\`/${k}/\${row.id}\`" class="text-fg hover:underline">{{ row.name }}</NuxtLink>
             <span class="text-muted">{{ row.createdAt.slice(0, 10) }}</span>
           </li>
         </ul>
       </Card>
     </AsyncState>
+
+    <Modal v-model="creating" label="${t.newTitle(what)}">
+${form(`${k}-form`, 'create', t.newTitle(what), 'creating')}
+    </Modal>
   </main>
 </template>
 
 <script setup lang="ts">
 import type { components } from '~/api/schema'
 
-useSiteHead({ title: '${n.title}' })
+type ${n.onePascal} = components['schemas']['${n.onePascal}']
 
-const rows = ref<components['schemas']['${n.onePascal}'][]>([])
+useSiteHead({ title: '${n.title}' })
+const toast = useToast()
+
+const rows = ref<${n.onePascal}[]>([])
 const pending = ref(true)
 const error = ref<string | null>(null)
 
 async function load() {
   pending.value = true
   error.value = null
-  const res = await useApi().GET('/api/v1/${n.kebab}', { params: { query: { limit: 50 } } })
-  // The API's error body carries a trace id — show it, so a report can be matched to the server log.
-  if (res.error) error.value = \`\${res.error.error.message} (trace \${res.error.error.traceId})\`
+  const res = await useApi().GET('/api/v1/${k}', { params: { query: { limit: 50 } } })
+  // The API's error body carries a trace id — apiProblem() shows it, so a report can be matched to the server log.
+  if (res.error) error.value = apiProblem(res.error).text
   else rows.value = res.data.data
   pending.value = false
+}
+
+// --- create -----------------------------------------------------------------------------------------------------
+// Add a field: an entry in \`form\`, an <Input> (or Select, Toggle …) in the form above with its error line, and the
+// field in the \`body\` below. \`problem.fields.<name>\` is what the API said about that field (400 VALIDATION).
+const creating = ref(false)
+const saving = ref(false)
+const form = ref({ name: '' })
+const problem = ref<ReturnType<typeof apiProblem> | null>(null)
+
+function openCreate() {
+  form.value = { name: '' }
+  problem.value = null
+  creating.value = true
+}
+
+async function create() {
+  saving.value = true
+  problem.value = null
+  const res = await useApi().POST('/api/v1/${k}', { body: { name: form.value.name } })
+  saving.value = false
+  if (res.error) {
+    problem.value = apiProblem(res.error)
+    return
+  }
+  creating.value = false
+  toast.show('${t.created}')
+  await load()
 }
 
 onMounted(load)
@@ -405,48 +466,238 @@ onMounted(load)
     })
     files.push({
       part: 'ui',
-      path: `tests/e2e/${n.kebab}.spec.ts`,
-      content: `import { expect, test } from '@playwright/test'
-import { captureErrors, failure, list, stubApi } from '../kit/e2e'
+      path: `app/pages/${k}/[id].vue`,
+      content: `<template>
+  <main class="mx-auto max-w-3xl space-y-6 p-6">
+    <NuxtLink to="/${k}" class="text-sm text-muted hover:underline" data-test="${k}-back">← ${t.back}</NuxtLink>
+    <AsyncState :pending="pending" :error="error" :has-data="record !== null" :retry="load">
+      <template v-if="record">
+        <header class="flex items-center justify-between gap-4">
+          <h1 class="text-xl font-semibold text-fg" data-test="title">{{ record.name }}</h1>
+          <div class="flex gap-2">
+            <Btn variant="secondary" data-test="${k}-edit" @click="openEdit">${t.edit}</Btn>
+            <Btn variant="danger" data-test="${k}-delete" @click="openDelete">${t.delete}</Btn>
+          </div>
+        </header>
+        <Card>
+          <dl class="grid grid-cols-[10rem_1fr] gap-y-2 text-sm" data-test="${k}-detail">
+            <dt class="text-muted">${t.name}</dt>
+            <dd class="text-fg">{{ record.name }}</dd>
+            <dt class="text-muted">${t.createdAt}</dt>
+            <dd class="text-fg">{{ record.createdAt }}</dd>
+            <dt class="text-muted">${t.updatedAt}</dt>
+            <dd class="text-fg">{{ record.updatedAt }}</dd>
+          </dl>
+        </Card>
+      </template>
+    </AsyncState>
 
-${auth ? "const me = { 'GET /api/v1/me': { status: 200, body: { data: { subject: 'e2e', name: 'E2E User', email: null, roles: ['editor'], kind: 'user' } } } }\n\n" : 'const me = {}\n\n'}test('${n.kebab}: lists what the API returns, with no JS error', async ({ page }) => {
+    <Modal v-model="editing" label="${t.editTitle(what)}">
+${form(`${k}-form`, 'save', t.editTitle(what), 'editing')}
+    </Modal>
+
+    <ConfirmModal v-model="deleting" title="${t.deleteTitle(what)}" message="${t.deleteMessage}" confirm-label="${t.delete}" cancel-label="${t.cancel}" danger :busy="saving" @confirm="remove">
+      <p v-if="problem" role="alert" class="mt-3 text-sm text-red-300" data-test="${k}-delete-error">{{ problem.text }}</p>
+    </ConfirmModal>
+  </main>
+</template>
+
+<script setup lang="ts">
+import type { components } from '~/api/schema'
+
+type ${n.onePascal} = components['schemas']['${n.onePascal}']
+
+const route = useRoute()
+const id = String(route.params.id)
+const toast = useToast()
+
+const record = ref<${n.onePascal} | null>(null)
+const pending = ref(true)
+const error = ref<string | null>(null)
+useSiteHead({ title: '${n.title}' })
+
+async function load() {
+  pending.value = true
+  error.value = null
+  const res = await useApi().GET('/api/v1/${k}/{id}', { params: { path: { id } } })
+  if (res.error) error.value = apiProblem(res.error).text
+  else record.value = res.data.data
+  pending.value = false
+}
+
+// --- edit + delete ----------------------------------------------------------------------------------------------
+// The same form as on the list page: one entry in \`form\` per field, sent as the PATCH body.
+const editing = ref(false)
+const deleting = ref(false)
+const saving = ref(false)
+const form = ref({ name: '' })
+const problem = ref<ReturnType<typeof apiProblem> | null>(null)
+
+function openEdit() {
+  form.value = { name: record.value?.name ?? '' }
+  problem.value = null
+  editing.value = true
+}
+
+async function save() {
+  saving.value = true
+  problem.value = null
+  const res = await useApi().PATCH('/api/v1/${k}/{id}', { params: { path: { id } }, body: { name: form.value.name } })
+  saving.value = false
+  if (res.error) {
+    problem.value = apiProblem(res.error)
+    return
+  }
+  record.value = res.data.data
+  editing.value = false
+  toast.show('${t.saved}')
+}
+
+function openDelete() {
+  problem.value = null
+  deleting.value = true
+}
+
+// DELETE is a soft delete on the API: the record disappears from every list, the row stays.
+async function remove() {
+  saving.value = true
+  problem.value = null
+  const res = await useApi().DELETE('/api/v1/${k}/{id}', { params: { path: { id } } })
+  saving.value = false
+  if (res.error) {
+    problem.value = apiProblem(res.error)
+    return
+  }
+  deleting.value = false
+  toast.show('${t.deleted}')
+  await navigateTo('/${k}')
+}
+
+onMounted(load)
+</script>
+`,
+    })
+    const meStub = auth ? `const me = { 'GET /api/v1/me': { status: 200, body: { data: { subject: 'e2e', name: 'E2E User', email: null, roles: ['admin'], kind: 'user' } } } }\n` : 'const me = {}\n'
+    files.push({
+      part: 'ui',
+      path: `tests/e2e/${k}.spec.ts`,
+      content: `import { expect, test } from '@playwright/test'
+import { captureErrors, failure, list, one, stubApi } from '../kit/e2e'
+
+// The pages of \`${k}\` against a stubbed API (no backend): list, create, the per-field error of a 400, the detail
+// page, edit, soft delete — and no JS error on the way.
+${meStub}const FIRST = ${sample}
+const invalid = (field: string, message: string) => ({ status: 400, body: { error: { code: 'VALIDATION', message: 'Request validation failed', details: [{ path: \`json.\${field}\`, message }], traceId: 'e2e-stub' } } })
+
+test('${k}: lists what the API returns, with no JS error', async ({ page }) => {
   const errors = captureErrors(page)
-  const { calls } = await stubApi(page, {
-    ...me,
-    'GET /api/v1/${n.kebab}': list([{ id: '1', name: 'First', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }]),
-  })
-  await page.goto('/${n.kebab}')
+  const { calls } = await stubApi(page, { ...me, 'GET /api/v1/${k}': list([FIRST]) })
+  await page.goto('/${k}')
   await expect(page.getByTestId('title')).toHaveText('${n.title}')
-  await expect(page.getByTestId('${n.kebab}-list')).toContainText('First')
-  expect(calls.some((call) => call.method === 'GET' && call.path === '/api/v1/${n.kebab}')).toBe(true)
+  await expect(page.getByTestId('${k}-list')).toContainText('First')
+  expect(calls.some((call) => call.method === 'GET' && call.path === '/api/v1/${k}')).toBe(true)
   errors.assertNone()
 })
 
-test('${n.kebab}: empty and error states', async ({ page }) => {
-  await stubApi(page, { ...me, 'GET /api/v1/${n.kebab}': list([]) })
-  await page.goto('/${n.kebab}')
-  await expect(page.getByText('No ${n.title.toLowerCase()} yet')).toBeVisible()
+test('${k}: empty and error states', async ({ page }) => {
+  await stubApi(page, { ...me, 'GET /api/v1/${k}': list([]) })
+  await page.goto('/${k}')
+  await expect(page.getByText('${t.noneYet(many)}')).toBeVisible()
 
   await page.unrouteAll()
-  await stubApi(page, { ...me, 'GET /api/v1/${n.kebab}': failure(500, 'INTERNAL', 'Internal server error') })
+  await stubApi(page, { ...me, 'GET /api/v1/${k}': failure(500, 'INTERNAL', 'Internal server error') })
   await page.reload()
   await expect(page.getByText('Internal server error (trace e2e-stub)')).toBeVisible()
 })
 
-test('${n.kebab}: the retry button of the error state loads the list again', async ({ page }) => {
+test('${k}: the retry button of the error state loads the list again', async ({ page }) => {
   let healthy = false
   const { calls } = await stubApi(page, {
     ...me,
-    'GET /api/v1/${n.kebab}': () => (healthy ? list([{ id: '1', name: 'Back again', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }]) : failure(500, 'INTERNAL', 'Internal server error')),
+    'GET /api/v1/${k}': () => (healthy ? list([{ ...FIRST, name: 'Back again' }]) : failure(500, 'INTERNAL', 'Internal server error')),
   })
-  await page.goto('/${n.kebab}')
+  await page.goto('/${k}')
   const alert = page.getByRole('alert')
   await expect(alert).toContainText('Internal server error')
   healthy = true
   await alert.getByRole('button').click()
-  await expect(page.getByTestId('${n.kebab}-list')).toContainText('Back again')
+  await expect(page.getByTestId('${k}-list')).toContainText('Back again')
   await expect(alert).toHaveCount(0)
-  expect(calls.filter((call) => call.path === '/api/v1/${n.kebab}')).toHaveLength(2)
+  expect(calls.filter((call) => call.path === '/api/v1/${k}')).toHaveLength(2)
+})
+
+test('${k}: create — a 400 is shown at its field, then the new record is in the list', async ({ page }) => {
+  const errors = captureErrors(page, { ignore: [/400/] }) // the browser logs the refused request itself
+  const rows = [FIRST]
+  const { calls } = await stubApi(page, {
+    ...me,
+    'GET /api/v1/${k}': () => list(rows),
+    'POST /api/v1/${k}': (request) => {
+      const body = request.postDataJSON() as { name: string }
+      if (!body.name) return invalid('name', 'Too small: expected string to have >=1 characters')
+      const created = { ...FIRST, id: '2', name: body.name }
+      rows.push(created)
+      return { status: 201, body: { data: created } }
+    },
+  })
+  await page.goto('/${k}')
+  await page.getByTestId('${k}-new').click()
+  await page.getByTestId('${k}-save').click()
+  await expect(page.getByTestId('${k}-name-error')).toHaveText('Too small: expected string to have >=1 characters')
+  await expect(page.getByTestId('${k}-form')).toBeVisible() // the form stays open with what was typed
+
+  await page.getByTestId('${k}-name').fill('Second')
+  await page.getByTestId('${k}-save').click()
+  await expect(page.getByTestId('${k}-form')).toHaveCount(0)
+  await expect(page.getByTestId('${k}-list')).toContainText('Second')
+  expect(calls.filter((call) => call.method === 'POST').map((call) => call.body)).toEqual([{ name: '' }, { name: 'Second' }])
+  errors.assertNone()
+})
+
+test('${k}: detail page — edit, then soft delete goes back to the list', async ({ page }) => {
+  const errors = captureErrors(page, { ignore: [/409/] })
+  let current = { ...FIRST }
+  let deleted = false
+  const { calls } = await stubApi(page, {
+    ...me,
+    'GET /api/v1/${k}': () => list(deleted ? [] : [current]),
+    'GET /api/v1/${k}/1': () => one(current),
+    'PATCH /api/v1/${k}/1': (request) => {
+      const body = request.postDataJSON() as { name: string }
+      if (body.name === 'Taken') return failure(409, 'CONFLICT', '${n.oneTitle} "Taken" already exists')
+      current = { ...current, name: body.name, updatedAt: '2026-02-02T00:00:00.000Z' }
+      return one(current)
+    },
+    'DELETE /api/v1/${k}/1': () => { deleted = true; return { status: 204 } },
+  })
+  await page.goto('/${k}')
+  await page.getByRole('link', { name: 'First' }).click()
+  await expect(page).toHaveURL(/\\/${k}\\/1$/)
+  await expect(page.getByTestId('title')).toHaveText('First')
+  await expect(page.getByTestId('${k}-detail')).toContainText('2026-01-01T00:00:00.000Z')
+
+  await page.getByTestId('${k}-edit').click()
+  await expect(page.getByTestId('${k}-name')).toHaveValue('First')
+  await page.getByTestId('${k}-name').fill('Taken')
+  await page.getByTestId('${k}-save').click()
+  await expect(page.getByTestId('${k}-form-error')).toContainText('already exists (trace e2e-stub)')
+  await page.getByTestId('${k}-name').fill('Renamed')
+  await page.getByTestId('${k}-save').click()
+  await expect(page.getByTestId('title')).toHaveText('Renamed')
+  await expect(page.getByTestId('${k}-form')).toHaveCount(0)
+
+  await page.getByTestId('${k}-delete').click()
+  await page.getByRole('dialog').getByRole('button', { name: '${t.delete}' }).click()
+  await expect(page).toHaveURL(/\\/${k}$/)
+  await expect(page.getByText('${t.noneYet(many)}')).toBeVisible()
+  expect(calls.filter((call) => call.method !== 'GET').map((call) => \`\${call.method} \${call.path}\`)).toEqual(['PATCH /api/v1/${k}/1', 'PATCH /api/v1/${k}/1', 'DELETE /api/v1/${k}/1'])
+  errors.assertNone()
+})
+
+test('${k}: a record that does not exist shows the API error, not a blank page', async ({ page }) => {
+  await stubApi(page, { ...me, 'GET /api/v1/${k}/nope': failure(404, 'NOT_FOUND', '${n.oneTitle} nope not found') })
+  await page.goto('/${k}/nope')
+  await expect(page.getByRole('alert')).toContainText('${n.oneTitle} nope not found (trace e2e-stub)')
 })
 `,
     })

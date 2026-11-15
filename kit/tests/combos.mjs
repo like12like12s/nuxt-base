@@ -267,6 +267,12 @@ async function fullModules(t) {
   if (t.uiDir) {
     t.begin('playbook add-page: scaffold add page reports')
     await t.scaffold(['add', 'page', 'reports', '--dir', t.dir, '--json'])
+    // nested + dynamic routes; a page below the flat `reports.vue` is refused instead of breaking it
+    t.begin('playbook add-page: nested and dynamic paths (audit-log/[id], audit-log/summary); below a flat page = exit 2')
+    await t.scaffold(['add', 'page', 'audit-log/[id]', '--dir', t.dir, '--json'])
+    await t.scaffold(['add', 'page', 'audit-log/summary', '--dir', t.dir, '--json'])
+    const refused = JSON.parse((await t.scaffold(['add', 'page', 'reports/[id]', '--dir', t.dir, '--json'], { expect: 2 })).out)
+    if (refused.code !== 'flat_parent') t.fail(`a page below a flat page was not refused as flat_parent: ${JSON.stringify(refused)}`)
   }
   t.begin('playbooks: the contract test is red until the contract is regenerated')
   const red = await t.run('npm', ['run', 'test'], { cwd, timeout: 300_000, expect: 1 })
@@ -303,6 +309,7 @@ async function fullModules(t) {
   await cli('dist/jobs/run.js', ['no-such-job'], { ...lockEnv, expect: 2 })
   if (!existsSync(join(t.dir, '.memory/docs/guides/job-nightly-sync.md'))) t.fail('the scheduler registration doc was not generated')
   if (resource.files.length < 5) t.fail('add resource generated fewer files than expected')
+  if (t.uiDir && !['ui/app/pages/order-lines/index.vue', 'ui/app/pages/order-lines/[id].vue', 'ui/tests/e2e/order-lines.spec.ts'].every((file) => resource.files.includes(file))) t.fail(`add resource did not generate the list + detail pages: ${resource.files.join(', ')}`)
 
   if (t.uiDir && !t.noE2e) {
     t.begin('playbooks: the UI e2e suite (generated pages, link previews for crawlers) on the rebuilt app')

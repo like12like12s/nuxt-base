@@ -41,7 +41,7 @@ describe('add resource', () => {
     expect(r.json).toMatchObject({ ok: true, type: 'resource', name: 'order-lines', generator: 'api' })
     expect(r.json.files).toEqual([
       'api/src/resources/order-lines/order-lines.schema.ts', 'api/src/resources/order-lines/order-lines.repo.ts', 'api/src/resources/order-lines/order-lines.routes.ts',
-      'api/src/db/migrations/0003_order_lines.ts', 'api/tests/order-lines.spec.ts', 'ui/app/pages/order-lines.vue', 'ui/tests/e2e/order-lines.spec.ts',
+      'api/src/db/migrations/0003_order_lines.ts', 'api/tests/order-lines.spec.ts', 'ui/app/pages/order-lines/index.vue', 'ui/app/pages/order-lines/[id].vue', 'ui/tests/e2e/order-lines.spec.ts',
     ])
     expect(r.json.patched).toEqual(['api/src/app.ts', 'api/src/db/migrations/index.ts', 'api/src/db/schema.ts', 'api/tests/helpers.ts', 'api/tests/auth.spec.ts'])
 
@@ -62,8 +62,8 @@ describe('add resource', () => {
     const matrix = read(dir, 'api/tests/auth.spec.ts')
     for (const row of ['GET /api/v1/order-lines', 'GET /api/v1/order-lines/:id', 'POST /api/v1/order-lines', 'PATCH /api/v1/order-lines/:id', 'DELETE /api/v1/order-lines/:id']) expect(matrix, row).toContain(`'${row}': { anonymous: 401,`)
     expect(read(dir, 'api/src/resources/order-lines/order-lines.repo.ts')).toContain("audited(db, { action: 'order_line.create' }")
-    expect(read(dir, 'ui/app/pages/order-lines.vue')).toContain("useApi().GET('/api/v1/order-lines'")
-    expect(read(dir, 'ui/app/pages/order-lines.vue')).toContain('<AsyncState :pending="pending" :error="error"')
+    expect(read(dir, 'ui/app/pages/order-lines/index.vue')).toContain("useApi().GET('/api/v1/order-lines'")
+    expect(read(dir, 'ui/app/pages/order-lines/index.vue')).toContain('<AsyncState :pending="pending" :error="error"')
 
     // nothing else changed, no locked file was touched, and the next steps name the derived files
     const after = snapshot(dir)
@@ -164,6 +164,7 @@ describe('generated pages only use what the layer has', () => {
   const layer = join(__dirname, '../../app')
   const tokens = new Set([...readFileSync(join(layer, 'assets/css/base.css'), 'utf8').matchAll(/--color-([a-z0-9-]+):/g)].map((m) => m[1]))
   const NOT_A_COLOUR = /^(?:xs|sm|base|lg|xl|\d+xl|left|center|right|x|y|\d+|t|b|l|r)$/
+  const PALETTE = /^(?:zinc|red|emerald|amber|sky)-\d{2,3}(?:\/\d+)?$/ // Tailwind's own scale — always there
   const pages = () => {
     const dir = project(['--kind', 'fullstack', '--with', 'api,db'])
     expect(add(dir, 'resource', 'order-lines').status).toBe(0)
@@ -184,7 +185,7 @@ describe('generated pages only use what the layer has', () => {
   it('every colour utility names a token of the layer (base.css)', () => {
     for (const [rel, text] of pages()) {
       const used = [...text.matchAll(/\b(?:divide|border|bg|text|ring)-([a-z][a-z0-9-]*)/g)].map((m) => m[1]!).filter((name) => !NOT_A_COLOUR.test(name))
-      expect(used.filter((name) => !tokens.has(name)), rel).toEqual([])
+      expect(used.filter((name) => !tokens.has(name) && !PALETTE.test(name)), rel).toEqual([])
     }
   })
 
@@ -194,6 +195,122 @@ describe('generated pages only use what the layer has', () => {
     const spec = Object.keys(snapshot(join(dir, 'ui/tests/e2e'))).map((rel) => read(dir, `ui/tests/e2e/${rel}`)).join('\n')
     expect(spec).toMatch(/getByRole\('alert'\)/)
     expect(spec).toMatch(/alert\.getByRole\('button'\)\.click\(\)/)
+  })
+})
+
+// Finding #4 (and #16): `add resource` only wrote a read-only list at pages/<name>.vue — the forms and the detail page
+// were ~130 hand-written lines per resource; `add page` refused anything but one flat word.
+describe('add resource — the pages of a resource', () => {
+  const pagesOf = (lang: string[] = []) => {
+    const dir = project(['--kind', 'fullstack', '--with', 'auth', ...lang])
+    const r = add(dir, 'resource', 'order-lines')
+    expect(r.status, r.stdout).toBe(0)
+    return { dir, list: read(dir, 'ui/app/pages/order-lines/index.vue'), detail: read(dir, 'ui/app/pages/order-lines/[id].vue'), e2e: read(dir, 'ui/tests/e2e/order-lines.spec.ts') }
+  }
+
+  it('<name>/index.vue lists and creates; <name>/[id].vue shows, edits and soft-deletes — through the typed client', () => {
+    const { list, detail } = pagesOf()
+    expect(list).toContain("useApi().GET('/api/v1/order-lines', { params: { query: { limit: 50 } } })")
+    expect(list).toContain("useApi().POST('/api/v1/order-lines', { body: { name: form.value.name } })")
+    expect(list).toContain('<NuxtLink :to="`/order-lines/${row.id}`"')
+    expect(detail).toContain("useApi().GET('/api/v1/order-lines/{id}', { params: { path: { id } } })")
+    expect(detail).toContain("useApi().PATCH('/api/v1/order-lines/{id}', { params: { path: { id } }, body: { name: form.value.name } })")
+    expect(detail).toContain("useApi().DELETE('/api/v1/order-lines/{id}', { params: { path: { id } } })")
+    expect(detail).toContain("await navigateTo('/order-lines')")
+  })
+
+  it('forms are the layer\'s Modal, the delete question its ConfirmModal; a 400 is shown at its field (details)', () => {
+    const { list, detail } = pagesOf()
+    for (const page of [list, detail]) {
+      expect(page).toMatch(/<Modal v-model="(creating|editing)"/)
+      expect(page).toContain('<Input v-model="form.name" data-test="order-lines-name" />')
+      expect(page).toContain('<p v-if="problem?.fields.name"')
+      expect(page).toContain('problem.value = apiProblem(res.error)')
+      // finding #16: reactive() + v-model inside a Modal slot does not type-check — the form state is a ref
+      expect(page).toContain("const form = ref({ name: '' })")
+      expect(page).not.toMatch(/\breactive\(/)
+      expect(page).not.toMatch(/\b(alert|confirm|prompt)\(/)
+    }
+    expect(detail).toMatch(/<ConfirmModal v-model="deleting"[^>]*danger[^>]*@confirm="remove">/)
+  })
+
+  it('the e2e spec walks create (with the per-field error), edit, delete and the missing record', () => {
+    const { e2e } = pagesOf()
+    for (const title of ['create — a 400 is shown at its field', 'detail page — edit, then soft delete goes back to the list', 'a record that does not exist shows the API error', 'the retry button of the error state']) expect(e2e).toContain(title)
+    expect(e2e).toContain("details: [{ path: `json.${field}`, message }]")
+    expect(e2e).toContain("getByTestId('order-lines-name-error')")
+  })
+
+  it('every visible word is in the project language', () => {
+    const th = pagesOf()
+    const en = pagesOf(['--lang', 'en'])
+    expect(th.list).toContain('>เพิ่ม</Btn>')
+    expect(th.detail).toContain('confirm-label="ลบ" cancel-label="ยกเลิก"')
+    expect(en.list).toContain('>Add</Btn>')
+    expect(en.detail).toContain('title="Delete this order line?"')
+    for (const text of [en.list, en.detail, en.e2e]) expect(text).not.toMatch(/[\u0E00-\u0E7F]/)
+    // nothing English is left in the Thai pages' markup except names and code
+    expect(th.list).not.toMatch(/>(Add|Create|Cancel|Save)</)
+  })
+
+  it('without a UI (kind api) there are no pages', () => {
+    const dir = project(['--kind', 'api', '--with', 'api,db'])
+    expect(add(dir, 'resource', 'order-lines').json.files.filter((f: string) => f.includes('pages'))).toEqual([])
+  })
+})
+
+describe('add page — nested and dynamic paths', () => {
+  it('reports/monthly and reports/[id]: the file mirrors the route, the page reads its params, the e2e visits a real URL', () => {
+    const dir = project(['--kind', 'nuxt-app'])
+    const nested = add(dir, 'page', 'reports/monthly')
+    expect(nested.status, nested.stdout).toBe(0)
+    expect(nested.json.files).toEqual(['app/pages/reports/monthly.vue', 'tests/e2e/reports-monthly.spec.ts'])
+    expect(read(dir, 'app/pages/reports/monthly.vue')).toContain('data-test="title">Reports / Monthly</h1>')
+    expect(read(dir, 'tests/e2e/reports-monthly.spec.ts')).toContain("await page.goto('/reports/monthly')")
+
+    const dynamic = add(dir, 'page', 'reports/[id]')
+    expect(dynamic.json.files).toEqual(['app/pages/reports/[id].vue', 'tests/e2e/reports-id.spec.ts'])
+    const page = read(dir, 'app/pages/reports/[id].vue')
+    expect(page).toContain('const route = useRoute()\nconst id = String(route.params.id)')
+    expect(page).toContain('data-test="params">{{ id }}</p>')
+    const spec = read(dir, 'tests/e2e/reports-id.spec.ts')
+    expect(spec).toContain("await page.goto('/reports/sample-id')")
+    expect(spec).toContain("toHaveText('sample-id')")
+
+    const deep = add(dir, 'page', 'teams/[teamId]/members/[memberId]')
+    expect(deep.json.files).toEqual(['app/pages/teams/[teamId]/members/[memberId].vue', 'tests/e2e/teams-teamId-members-memberId.spec.ts'])
+    expect(read(dir, 'app/pages/teams/[teamId]/members/[memberId].vue')).toContain('const teamId = String(route.params.teamId)\nconst memberId = String(route.params.memberId)')
+  })
+
+  it('a flat page keeps working: `add page reports` is still reports.vue, and a page BELOW a flat one is refused with the fix', () => {
+    const dir = project(['--kind', 'fullstack'])
+    expect(add(dir, 'page', 'reports').json.files).toEqual(['ui/app/pages/reports.vue', 'ui/tests/e2e/reports.spec.ts'])
+    const before = snapshot(dir)
+    const r = add(dir, 'page', 'reports/[id]')
+    expect(r.status).toBe(2)
+    expect(r.json).toMatchObject({ ok: false, code: 'flat_parent' })
+    expect(r.json.message).toContain('git mv app/pages/reports.vue app/pages/reports/index.vue')
+    expect(snapshot(dir)).toEqual(before) // nothing written: reports.vue is not turned into a parent route by accident
+  })
+
+  it('a page named like an existing directory becomes its index.vue (never a parent route next to it)', () => {
+    const dir = project(['--kind', 'nuxt-app'])
+    add(dir, 'page', 'reports/[id]')
+    expect(add(dir, 'page', 'reports').json.files).toEqual(['app/pages/reports/index.vue', 'tests/e2e/reports.spec.ts'])
+    expect(existsSync(join(dir, 'app/pages/reports.vue'))).toBe(false)
+  })
+
+  it('what is not a route path is a usage error (exit 2); a reserved word is refused per segment', () => {
+    const dir = project(['--kind', 'nuxt-app'])
+    for (const bad of ['[id]', 'reports/', '/reports', 'reports//x', 'Reports/x', 'reports/[ID]', 'reports/[id', 'reports/[my-id]', '../x', 'reports/[...slug]']) {
+      const r = add(dir, 'page', bad)
+      expect(r.status, bad).toBe(2)
+    }
+    expect(add(dir, 'page', 'reports/delete').json).toMatchObject({ ok: false, code: 'reserved_name' })
+    // only pages take a path
+    const full = project(['--kind', 'fullstack', '--with', 'api,db,jobs'])
+    expect(add(full, 'resource', 'orders/lines').status).toBe(2)
+    expect(add(full, 'job', 'nightly/sync').status).toBe(2)
   })
 })
 

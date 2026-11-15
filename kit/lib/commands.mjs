@@ -12,6 +12,7 @@ import { upgradeNotes } from './upgrading.mjs'
 
 const MANIFEST = '.scaffold.json'
 const NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/
+const PAGE_PATH = /^[a-z][a-z0-9]*(-[a-z0-9]+)*(\/([a-z][a-z0-9]*(-[a-z0-9]+)*|\[[a-z][A-Za-z0-9]*\]))*$/
 
 function readManifest(dir) {
   const file = join(dir, MANIFEST)
@@ -202,8 +203,13 @@ export function cmdList(kit) {
 export async function cmdAdd(kit, opts) {
   const { type, name } = opts
   if (!GENERATOR_TYPES.includes(type)) throw usageError(`add: unknown type "${type ?? ''}" (${GENERATOR_TYPES.join('|')})`)
-  if (!name || !NAME.test(name)) throw usageError(`add ${type}: invalid name "${name ?? ''}" — lowercase kebab-case`)
-  const reserved = reservedName(name)
+  // A page is a route: nested (`reports/monthly`) and dynamic (`reports/[id]`) paths are names too. Everything else
+  // is one kebab-case word.
+  const isPage = type === 'page'
+  if (!name || !(isPage ? PAGE_PATH : NAME).test(name)) {
+    throw usageError(`add ${type}: invalid name "${name ?? ''}" — ${isPage ? 'lowercase kebab-case segments separated by "/", a dynamic segment as [param] (reports, reports/monthly, reports/[id]); the first segment is never dynamic' : 'lowercase kebab-case'}`)
+  }
+  const reserved = (isPage ? name.split('/').filter((segment) => !segment.startsWith('[')) : [name]).map(reservedName).find(Boolean)
   if (reserved) throw usageError(`add ${type}: "${name}" cannot be used as a name — ${reserved}. Pick a more specific one (e.g. ${name}-${type === 'job' ? 'job' : type === 'page' ? 'page' : 'records'}).`, 'reserved_name')
   const dir = resolve(opts.dir ?? '.')
   const manifest = readManifest(dir)

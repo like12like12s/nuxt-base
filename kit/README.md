@@ -16,6 +16,7 @@ node <KIT>/bin/scaffold.mjs new <name> --kind nuxt-app|api|fullstack [--with a,b
      [--deploy cf-pages|container|pm2] [--port N] [--api-port N] [--no-sample] [--lang th|en]
      --dir <target> [--context ctx.json] [--dry-run] [--json]
 node <KIT>/bin/scaffold.mjs add resource|page|job <name> [--dir <project>] [--json]
+                                   (page: <name> may be a route path — reports/monthly, reports/[id])
 node <KIT>/bin/scaffold.mjs check [<dir>] [--json]     exit 0 clean · 1 drift
 node <KIT>/bin/scaffold.mjs update [<dir>] [--json]    re-copy locked files + bump the layer tag
 node <KIT>/bin/scaffold.mjs list [--json]              kinds, modules, deploy presets, kitVersion
@@ -273,12 +274,19 @@ identifier would be a reserved word or shadow a built-in type (`delete`, `classe
 code `reserved_name`). `update` / `add` never write through a symlink that leaves the project (`path_escape`).
 
 ```
-page       kind nuxt-app (also in fullstack)   app/pages/<name>.vue on the AsyncState pattern + tests/e2e/<name>.spec.ts
+page       kind nuxt-app (also in fullstack)   app/pages/<path>.vue on the AsyncState pattern + its e2e spec. <path> is
+                                                one word, nested (reports/monthly) or dynamic (reports/[id] — the page
+                                                reads route.params). Below an existing flat page it is refused (exit 2,
+                                                `flat_parent`, with the `git mv` that fixes it); named like an existing
+                                                directory it becomes that directory's index.vue
 resource   module api                           schemas, repository (name unique among live rows by a database index ->
                                                 409; writes never touch a deleted row), routes (with auth declarations
                                                 when the auth module is installed), migration, tests; registered at the anchors in src/app.ts,
                                                 src/db/migrations/index.ts, src/db/schema.ts, tests/helpers.ts and the
-                                                matrix of tests/auth.spec.ts; fullstack: a list page + its e2e spec
+                                                matrix of tests/auth.spec.ts; fullstack: app/pages/<name>/index.vue (list
+                                                + create form) and <name>/[id].vue (detail, edit form, soft delete) —
+                                                forms in the layer's Modal, delete behind ConfirmModal, a 400 shown per
+                                                field — with an e2e spec that walks all of it
 job        module jobs                          src/jobs/<name>.ts, its test, the registration in src/jobs/index.ts and
                                                 .memory/docs/guides/job-<name>.md (the scheduler entry for the operator)
 ```

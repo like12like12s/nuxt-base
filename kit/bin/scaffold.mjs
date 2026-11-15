@@ -11,7 +11,7 @@ const USAGE = `usage:
   scaffold new <name> --kind nuxt-app|api|fullstack [--with a,b,c] [--db sqlite|mysql]
            [--deploy cf-pages|container|pm2] [--port N] [--api-port N] [--no-sample] [--lang th|en]
            --dir <target> [--context ctx.json] [--dry-run] [--json]
-  scaffold add resource|page|job <name> [--dir <project>] [--json]
+  scaffold add resource|page|job <name> [--dir <project>] [--json]     page: also a path — reports/monthly, reports/[id]
   scaffold check [<dir>] [--json]      exit 0 clean, 1 drift (names the kit version + commit it compared against)
   scaffold update [<dir>] [--json]     re-copy locked files + bump the layer tag; prints the by-hand notes of UPGRADING.md
   scaffold list [--json]
