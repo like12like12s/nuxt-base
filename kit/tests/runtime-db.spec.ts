@@ -52,6 +52,7 @@ const DEADLOCK = () => fault({ errno: 1213, code: 'ER_LOCK_DEADLOCK' }, 'Deadloc
 const LOCK_WAIT = () => fault({ errno: 1205, code: 'ER_LOCK_WAIT_TIMEOUT' })
 const RESET = () => fault({ code: 'ECONNRESET' }, 'read ECONNRESET')
 const REFUSED = () => fault({ code: 'ECONNREFUSED' }, 'connect ECONNREFUSED')
+const CLOSED = () => fault({ fatal: true }, "Can't add new command when connection is in closed state")
 const DUPLICATE = () => fault({ errno: 1062, code: 'ER_DUP_ENTRY' }, 'Duplicate entry')
 
 interface Flaky {
@@ -346,6 +347,39 @@ describe('transient errors — what is retried and what is not', () => {
       let failed = 0
       await expect(withTransaction(t.db, async () => { failed++; throw DUPLICATE() }, { backoffMs: 1 })).rejects.toMatchObject({ errno: 1062 })
       expect(failed).toBe(1)
+    })
+
+    // H1 (review t1097): the COMMIT is applied, its acknowledgement is lost, and the ROLLBACK Kysely sends next fails
+    // on the dead connection with mysql2's "closed state" message — which used to be classified `unsent` and replayed.
+    it('a COMMIT whose acknowledgement is lost is never replayed: the unit runs once and fails COMMIT_OUTCOME_UNKNOWN', async () => {
+      const t = await flakyDb(dialect)
+      t.f.failQuery(/^commit$/i, () => fault({ code: 'ECONNRESET', fatal: true }, 'read ECONNRESET'), 1, true)
+      t.f.failQuery(/^rollback$/i, CLOSED, 5)
+      let runs = 0
+      const row = { ...created(), name: 'once', count: 0 }
+      const outcome = await audited(t.db, { action: 'thing.create' }, async (trx) => {
+        runs++
+        await trx.insertInto('things').values({ ...row, id: `${row.id}-${runs}` }).execute()
+        return { result: row.id, target: `thing:${row.id}`, after: row }
+      }).then(() => 'ok', (e: Error & { code?: string }) => e)
+      const audit = Number((await t.db.selectFrom('audit').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).n)
+      expect({ runs, things: await t.count(), audit, commits: t.f.sent.filter((s) => /^commit$/i.test(s)).length }).toEqual({ runs: 1, things: 1, audit: 1, commits: 1 })
+      expect(outcome).toMatchObject({ name: 'CommitOutcomeUnknownError', code: 'COMMIT_OUTCOME_UNKNOWN' })
+      expect(transientKind(outcome)).toBeNull()
+      expect((outcome as Error).cause).toMatchObject({ code: 'ECONNRESET' })
+      expect(t.events).toEqual([])
+      // the pool is usable afterwards
+      await t.insert('next')
+      expect(await t.count()).toBe(2)
+    })
+
+    it('a COMMIT the database itself refused (deadlock) is known to have failed: the unit is replayed', async () => {
+      const t = await flakyDb(dialect)
+      t.f.failQuery(/^commit$/i, DEADLOCK)
+      let runs = 0
+      await withTransaction(t.db, async (trx) => { runs++; await trx.insertInto('things').values({ ...created(), name: `run ${runs}`, count: 0 }).execute() }, { backoffMs: 1 })
+      expect(runs).toBe(2)
+      expect(await t.db.selectFrom('things').select('name').execute()).toEqual([{ name: 'run 2' }])
     })
   })
 

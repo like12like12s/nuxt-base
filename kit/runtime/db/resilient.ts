@@ -12,6 +12,11 @@
 // Inside a transaction nothing is replayed statement by statement: the transaction is gone (or half applied), so the
 // whole unit has to run again — that is what withTransaction() in repo.ts does. Everything else (constraint
 // violations, syntax errors, a query timeout) fails at once.
+//
+// COMMIT is the one statement that is never transient: once it was sent and the answer did not come back (socket
+// reset, timeout, closed connection), the transaction may be durable. The unit is NOT replayed — the caller gets
+// COMMIT_OUTCOME_UNKNOWN and has to find out (read the row back) before doing the write again. Only a COMMIT the
+// database itself answered with an error (deadlock, constraint) is known to have failed and keeps its own error.
 import {
   SelectQueryNode,
   type CompiledQuery,
@@ -31,10 +36,29 @@ const UNSENT = new Set(['ECONNREFUSED', 'EPIPE', 'ENOTFOUND', 'EAI_AGAIN', 'EHOS
 const CONNECTION = new Set(['PROTOCOL_CONNECTION_LOST', 'ECONNRESET', 'ETIMEDOUT', 'PROTOCOL_SEQUENCE_TIMEOUT'])
 const MYSQL_CONNECTION = new Set([1053, 2006, 2013]) // server shutdown, gone away, lost connection during query
 
+/** COMMIT was sent and no answer came back: the transaction may or may not be durable. Never retried. */
+export class CommitOutcomeUnknownError extends Error {
+  readonly code = 'COMMIT_OUTCOME_UNKNOWN'
+  constructor(cause: unknown) {
+    super('the connection failed while committing: the transaction may or may not have been applied', { cause })
+    this.name = 'CommitOutcomeUnknownError'
+  }
+}
+
+/** True when the database itself answered with an error (so the statement is known not to have been applied). */
+function answeredByDatabase(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const e = error as { code?: unknown; errno?: unknown; fatal?: unknown }
+  if (e.code === 'ERR_SQLITE_ERROR') return true
+  // MySQL server errors are 1000-1999 and 3000+; 2000-2999 are client-side (connection) errors.
+  return typeof e.errno === 'number' && e.errno >= 1000 && !(e.errno >= 2000 && e.errno < 3000) && !MYSQL_CONNECTION.has(e.errno) && e.fatal !== true
+}
+
 /** What kind of transient failure this is, or null when retrying cannot help. */
 export function transientKind(error: unknown): TransientKind | null {
   if (!error || typeof error !== 'object') return null
   const e = error as { code?: unknown; errno?: unknown; errcode?: unknown; message?: unknown; fatal?: unknown }
+  if (e.code === 'COMMIT_OUTCOME_UNKNOWN') return null
   if (e.code === 'ERR_SQLITE_ERROR') return typeof e.errcode === 'number' && SQLITE_LOCK.has(e.errcode & 0xff) ? 'lock' : null
   if (typeof e.errno === 'number' && MYSQL_LOCK.has(e.errno)) return 'lock'
   if (typeof e.code === 'string') {
@@ -84,6 +108,8 @@ const isReplaySafe = (query: CompiledQuery): boolean => SelectQueryNode.is(query
 
 class ResilientConnection implements DatabaseConnection {
   inTransaction = false
+  /** Set when a failed COMMIT already cleaned up: the ROLLBACK Kysely sends next must not run (or mask the error). */
+  commitFailed = false
   constructor(public inner: DatabaseConnection, private readonly driver: Driver, private readonly options: ResilienceOptions) {}
 
   executeQuery<R>(query: CompiledQuery): Promise<QueryResult<R>> {
@@ -123,17 +149,29 @@ class ResilientDriver implements Driver {
     const c = connection as ResilientConnection
     await this.inner.beginTransaction(c, settings) // through executeQuery above: a dead pooled connection is replaced
     c.inTransaction = true
+    c.commitFailed = false
   }
   async commitTransaction(connection: DatabaseConnection): Promise<void> {
     const c = connection as ResilientConnection
     try {
       await this.inner.commitTransaction(c.inner)
+    } catch (error) {
+      if (answeredByDatabase(error)) throw error // known not committed: Kysely rolls back, the caller may replay
+      // No answer to COMMIT. Roll back here (it only helps when the commit never arrived; on a dead connection it
+      // fails, and that failure must not replace this error), then tell the caller the truth.
+      c.commitFailed = true
+      await this.inner.rollbackTransaction(c.inner).catch(() => undefined)
+      throw new CommitOutcomeUnknownError(error)
     } finally {
       c.inTransaction = false
     }
   }
   async rollbackTransaction(connection: DatabaseConnection): Promise<void> {
     const c = connection as ResilientConnection
+    if (c.commitFailed) {
+      c.commitFailed = false
+      return
+    }
     try {
       await this.inner.rollbackTransaction(c.inner)
     } finally {
