@@ -284,6 +284,18 @@ describe('notify client (mocked hub)', () => {
     expect(errors.join()).not.toContain('tok-123')
   })
 
+  // L3: userinfo in NOTIFIER_URL put the credentials into every error message, result and log line
+  it('a URL with credentials, or one that is not http(s), is a config error that never repeats the value', () => {
+    const withCredentials = ['https://ops', 'hunter2@hub.example.com'].join(':')
+    for (const url of [withCredentials, 'https://ops@hub.example.com', 'ftp://hub.example.com', 'not a url']) {
+      let message = ''
+      try { createNotifier({ url }) } catch (error) { message = `${(error as Error).name}: ${(error as Error).message}` }
+      expect(message, url).toMatch(/^NotifierConfigError: NOTIFIER_URL /)
+      expect(message).not.toMatch(/hunter2|ops@|hub\.example/)
+    }
+    expect(createNotifier({ url: ' https://hub.example.com/base/ ' }).enabled).toBe(true)
+  })
+
   it('sends no authorization header without a token and leaves optional fields out', async () => {
     const fetch = hub()
     await createNotifier({ url: 'https://hub.example.com', fetch }).notify(message)

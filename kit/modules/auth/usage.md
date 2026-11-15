@@ -42,6 +42,9 @@ keep working) and logs `forward-auth headers ignored`.
 ```
 app.example.com {
     route {
+        # whatever a client sent under these names is dropped before anything else looks at the request
+        request_header -X-Authentik-*
+        request_header -x-auth-proxy-secret
         reverse_proxy /outpost.goauthentik.io/* <outpost>:9000
         forward_auth <outpost>:9000 {
             uri /outpost.goauthentik.io/auth/caddy

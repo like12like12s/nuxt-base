@@ -41,10 +41,13 @@ describe('trace id and request log', () => {
     expect(JSON.stringify(lines)).not.toContain('abc') // the query string may carry tokens
   })
 
-  it('continues the trace of an incoming traceparent header', async () => {
+  it('a caller does not choose the trace id: traceparent is continued only with TRUST_TRACEPARENT=1 (or through the trusted proxy)', async () => {
     const traceId = '4bf92f3577b34da6a3ce929d0e0e4736'
-    const res = await t.build().api.get('/health/live', { headers: { traceparent: `00-${traceId}-00f067aa0ba902b7-01` } })
-    expect(res.traceId).toBe(traceId)
+    const headers = { traceparent: `00-${traceId}-00f067aa0ba902b7-01` }
+    const untrusted = await t.build().api.get('/health/live', { headers })
+    expect(untrusted.traceId).toMatch(TRACE_ID)
+    expect(untrusted.traceId).not.toBe(traceId)
+    expect((await t.build({}, { TRUST_TRACEPARENT: '1' }).api.get('/health/live', { headers })).traceId).toBe(traceId)
   })
 
   it('ignores a malformed traceparent', async () => {

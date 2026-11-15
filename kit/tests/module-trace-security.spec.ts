@@ -36,7 +36,7 @@ describe('trace module', () => {
     expect(firstImport).toBe("import './tracing.js' // first: tracing is set up before anything else loads")
     expect(index).toContain('await stopTracing()')
     expect(read(dir, 'src/tracing.ts')).toContain("startTracing({ serviceName: 'demo-app-api' })")
-    expect(read(dir, 'src/app.ts')).toContain('before: [traceMiddleware()],')
+    expect(read(dir, 'src/app.ts')).toContain('before: [traceMiddleware({ trustParent: trustTraceparent })],')
     expect(r.json.files).toContain('tests/trace.spec.ts')
     expect(Object.keys(JSON.parse(read(dir, 'package.json')).dependencies).filter((d) => d.startsWith('@opentelemetry/'))).toEqual([
       '@opentelemetry/api', '@opentelemetry/context-async-hooks', '@opentelemetry/core', '@opentelemetry/exporter-trace-otlp-http', '@opentelemetry/resources', '@opentelemetry/sdk-trace',

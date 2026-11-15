@@ -3,6 +3,9 @@
 // /openapi.json. This file only says what THIS app adds: its readiness checks and its resources under /api/v1.
 import { readFileSync } from 'node:fs'
 // @kit:if auth
+import type { Context } from 'hono'
+// @kit:end
+// @kit:if auth
 import { appAuth } from './auth/index.js'
 // @kit:end
 import type { Config } from './config.js'
@@ -40,12 +43,27 @@ export const appLogger = (config: Pick<Config, 'LOG_LEVEL' | 'NODE_ENV'>, write?
 
 export function createApp(config: Config, deps: AppDeps) {
   const logger = deps.logger ?? appLogger(config)
+  // @kit:if auth
+  // Who is calling: resolved once per request, in front of EVERY route — also one added outside /api/v1. A route says
+  // what it demands with publicRoute() / requireAuth() / requireRole() as its first middleware; one without a
+  // declaration is refused at run time (500) and fails tests/auth.spec.ts. Only the standard's own system routes
+  // (/health/*, /version, /openapi.json) are exempt.
+  const auth = appAuth(config, deps.database, logger)
+  // Whose `traceparent` is continued (the trace id lands in audit rows and logs): a request that came through the
+  // trusted proxy, or everyone when TRUST_TRACEPARENT=1 says only trusted callers reach this API.
+  const trustTraceparent = (c: Context) => config.TRUST_TRACEPARENT === '1' || auth.viaProxy(c)
+  // @kit:else
+  // Whose `traceparent` is continued (the trace id lands in audit rows and logs): nobody, unless TRUST_TRACEPARENT=1
+  // says only trusted callers reach this API.
+  const trustTraceparent = () => config.TRUST_TRACEPARENT === '1'
+  // @kit:end
   const api = createApi({
     name: SERVICE,
     version: VERSION,
     logger,
     checks: databaseChecks(deps.database, deps.migrations ?? shippedMigrations),
     build: { commit: config.APP_COMMIT, builtAt: config.APP_BUILT_AT },
+    trustTraceparent,
     // @kit:if security
     // In front of every route: secure headers, CORS allowlist, rate limit, body size limit.
     middleware: security({
@@ -67,16 +85,12 @@ export function createApp(config: Config, deps: AppDeps) {
     // @kit:end
     // @kit:if trace
     // Around everything: the request's trace id is the id of this span (a no-op while tracing is off).
-    before: [traceMiddleware()],
+    before: [traceMiddleware({ trustParent: trustTraceparent })],
     // @kit:end
   })
 
   // @kit:if auth
-  // Who is calling: resolved once per request, in front of EVERY route — also one added outside /api/v1. A route says
-  // what it demands with publicRoute() / requireAuth() / requireRole() as its first middleware; one without a
-  // declaration is refused at run time (500) and fails tests/auth.spec.ts. Only the standard's own system routes
-  // (/health/*, /version, /openapi.json) are exempt.
-  api.use('*', appAuth(config, deps.database, logger).middleware)
+  api.use('*', auth.middleware)
 
   // @kit:end
   // Resources of the app. One register<Resource>() per resource, all under /api/v1.

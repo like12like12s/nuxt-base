@@ -26,6 +26,15 @@ describe('auth module', () => {
   describe('kind api', () => {
     const { dir, r } = scaffold(['--kind', 'api', '--with', 'auth'])
 
+    // L14: the text said the proxy must remove client-sent identity headers; the snippet did not do it
+    it('the Caddy example in usage.md strips client-sent identity and secret headers before forward_auth', () => {
+      const usage = read(dir, '.memory/docs/guides/usage.md')
+      const strip = usage.indexOf('request_header -X-Authentik-*')
+      expect(strip).toBeGreaterThan(-1)
+      expect(usage).toContain('request_header -x-auth-proxy-secret')
+      expect(strip).toBeLessThan(usage.indexOf('forward_auth <outpost>:9000'))
+    })
+
     it('locks the runtime and adds the app-owned wiring, the /me resource, the token command and the matrix test', () => {
       expect(r.status).toBe(0)
       expect(r.json.locked.filter((p: string) => p.startsWith('src/kit/auth/'))).toEqual(['cli', 'guard', 'proxy', 'tokens', 'users'].map((f) => `src/kit/auth/${f}.ts`))
@@ -35,7 +44,9 @@ describe('auth module', () => {
 
     it('the app mounts the auth middleware in front of /api/v1 and every items route declares its rule', () => {
       const app = read(dir, 'src/app.ts')
-      expect(app).toContain("api.use('*', appAuth(config, deps.database, logger).middleware)") // every path, not only /api/v1 (M13)
+      expect(app).toContain('const auth = appAuth(config, deps.database, logger)')
+      expect(app).toContain("api.use('*', auth.middleware)") // every path, not only /api/v1 (M13)
+      expect(app).toContain("const trustTraceparent = (c: Context) => config.TRUST_TRACEPARENT === '1' || auth.viaProxy(c)") // L1
       expect(app.indexOf('appAuth(config')).toBeLessThan(app.indexOf('mountV1(api'))
       expect(app).toContain('registerMe(v1)')
       const routes = read(dir, 'src/resources/items/items.routes.ts')

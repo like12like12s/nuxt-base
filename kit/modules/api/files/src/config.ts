@@ -17,6 +17,9 @@ const shape = {
   PORT: z.coerce.number().int().min(1).max(65535),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   ...database,
+  // 1 = continue the trace (`traceparent`) of ANY caller. Only for an API that untrusted clients cannot reach: the
+  // trace id is written into audit rows and logs. Default: only requests through the trusted proxy (auth module).
+  TRUST_TRACEPARENT: z.enum(['0', '1']).default('0'),
   APP_COMMIT: z.string().optional(),
   APP_BUILT_AT: z.string().optional(),
   // @kit:if notify

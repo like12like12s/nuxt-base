@@ -37,12 +37,16 @@ describe('tracing', () => {
     expect(audit.traceId).toBe(res.traceId)
   })
 
-  it('continues the trace of the caller (traceparent)', async () => {
+  it('continues the trace of a trusted caller (TRUST_TRACEPARENT=1); anyone else starts a new trace', async () => {
     startTracing({ serviceName: 'test-api', env: { OTEL_EXPORTER_OTLP_ENDPOINT: collector.url } })
     const traceId = '4bf92f3577b34da6a3ce929d0e0e4736'
-    const res = await t.build().api.get('/api/v1/items', { headers: { traceparent: `00-${traceId}-00f067aa0ba902b7-01` } })
+    const headers = { traceparent: `00-${traceId}-00f067aa0ba902b7-01` }
+    const res = await t.build({}, { TRUST_TRACEPARENT: '1' }).api.get('/api/v1/items', { headers })
+    const untrusted = await t.build().api.get('/api/v1/items', { headers })
     await flushTracing()
     expect(res.traceId).toBe(traceId)
     expect(collector.spans().some((s) => s.traceId === traceId && s.parentSpanId === '00f067aa0ba902b7')).toBe(true)
+    expect(untrusted.traceId).not.toBe(traceId)
+    expect(collector.spans().some((s) => s.traceId === untrusted.traceId && !s.parentSpanId)).toBe(true)
   })
 })

@@ -39,16 +39,24 @@ export function setTraceIdProvider(provider: () => string | undefined): void {
   activeTraceId = provider
 }
 
-const TRACEPARENT = /^[0-9a-f]{2}-([0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]{2}$/
+const TRACEPARENT = /^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/
 
-/** W3C `traceparent` header -> trace id; undefined when the header is absent, malformed or all zeros. */
+/**
+ * W3C `traceparent` header -> trace id; undefined when the header is absent or not valid per the spec: malformed,
+ * version `ff`, an all-zero trace id or an all-zero parent id.
+ */
 export function parseTraceparent(header: string | null | undefined): string | undefined {
-  const id = header ? TRACEPARENT.exec(header.trim().toLowerCase())?.[1] : undefined
-  return id && !/^0+$/.test(id) ? id : undefined
+  const match = header ? TRACEPARENT.exec(header.trim().toLowerCase()) : null
+  if (!match) return undefined
+  const [, version, traceId, parentId] = match
+  return version !== 'ff' && !/^0+$/.test(traceId!) && !/^0+$/.test(parentId!) ? traceId : undefined
 }
 
 export const newTraceId = (): string => randomBytes(16).toString('hex')
 
-/** Active span (trace module) -> incoming `traceparent` -> a new id. */
+/**
+ * Active span (trace module) -> incoming `traceparent` -> a new id. Pass the header only for a caller that is
+ * trusted to choose the trace id (createApi's `trustTraceparent`): the id ends up in the audit rows and the logs.
+ */
 export const resolveTraceId = (traceparent: string | null | undefined): string =>
   activeTraceId() ?? parseTraceparent(traceparent) ?? newTraceId()

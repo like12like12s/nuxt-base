@@ -34,8 +34,30 @@ export interface Notifier {
   notify(message: NotifyMessage): Promise<NotifyResult>
 }
 
+export class NotifierConfigError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'NotifierConfigError'
+  }
+}
+
+/**
+ * Throws NotifierConfigError (never quoting the value) when the URL is not a plain http(s) URL or carries
+ * credentials (userinfo in front of the host): they would end up in every error message, result and log line that
+ * names the request — the bearer token (NOTIFIER_TOKEN) is the only credential of the hub.
+ */
 export function createNotifier(options: NotifierOptions = {}): Notifier {
   const base = options.url?.trim().replace(/\/+$/, '') ?? ''
+  if (base) {
+    let parsed: URL | null = null
+    try {
+      parsed = new URL(base)
+    } catch {
+      parsed = null
+    }
+    if (!parsed || !['http:', 'https:'].includes(parsed.protocol)) throw new NotifierConfigError('NOTIFIER_URL is not an http(s) URL')
+    if (parsed.username || parsed.password) throw new NotifierConfigError('NOTIFIER_URL must not contain credentials (user:password@) — use NOTIFIER_TOKEN')
+  }
   const { token, timeoutMs = 5000, onError } = options
   const send = options.fetch ?? globalThis.fetch
   return {

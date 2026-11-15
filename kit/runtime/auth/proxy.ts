@@ -76,13 +76,18 @@ export function proxyAuth(trust: ProxyTrust) {
   const secret = trust.secret?.trim() || undefined
   const sources = trust.trustedProxies?.length ? trustedSources(trust.trustedProxies) : undefined
   const configured = Boolean(secret || sources)
+  const refusal = (header: (name: string) => string | undefined, remoteAddress: string | undefined): 'not-configured' | 'bad-secret' | 'untrusted-source' | null => {
+    if (!configured) return 'not-configured'
+    if (secret && !safeEqual(header(PROXY_SECRET_HEADER) ?? '', secret)) return 'bad-secret'
+    if (sources && !sources(remoteAddress)) return 'untrusted-source'
+    return null
+  }
 
-  return function read(header: (name: string) => string | undefined, remoteAddress: string | undefined): ProxyResult {
+  function read(header: (name: string) => string | undefined, remoteAddress: string | undefined): ProxyResult {
     const username = header('x-authentik-username')?.trim()
     if (!username) return { kind: 'none' }
-    if (!configured) return { kind: 'rejected', reason: 'not-configured' }
-    if (secret && !safeEqual(header(PROXY_SECRET_HEADER) ?? '', secret)) return { kind: 'rejected', reason: 'bad-secret' }
-    if (sources && !sources(remoteAddress)) return { kind: 'rejected', reason: 'untrusted-source' }
+    const reason = refusal(header, remoteAddress)
+    if (reason) return { kind: 'rejected', reason }
     const value = (name: string) => header(name)?.trim() || undefined
     return {
       kind: 'trusted',
@@ -95,6 +100,9 @@ export function proxyAuth(trust: ProxyTrust) {
       },
     }
   }
+  /** Did this request provably come through the proxy — whether or not it carries an identity? */
+  read.viaProxy = (header: (name: string) => string | undefined, remoteAddress: string | undefined): boolean => refusal(header, remoteAddress) === null
+  return read
 }
 
 /**

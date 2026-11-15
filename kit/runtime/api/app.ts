@@ -2,7 +2,7 @@
 // `scaffold check` reports local edits and `scaffold update` overwrites them. Change it in the kit instead.
 //
 // The API standard as one factory. createApi() returns a hono app (OpenAPIHono) that already has:
-//   - a request scope: trace id (active span -> `traceparent` -> generated), echoed in `x-trace-id`, on every log line
+//   - a request scope: trace id (active span -> `traceparent` of a TRUSTED caller -> generated), echoed in `x-trace-id`, on every log line
 //   - one JSON log line per request: ts level msg service env traceId method path status ms
 //   - the error shape { error: { code, message, details?, traceId } } for every status >= 400, validation included
 //   - GET /health/live · GET /health/ready (pluggable checks, 503 + the check list) · GET /version · GET /openapi.json
@@ -14,7 +14,7 @@ import { getContext, resolveTraceId, runWithContext } from './context.js'
 import { ApiError, ErrorSchema, codeForStatus, errorBody, validation } from './errors.js'
 import { runChecks, type HealthCheck } from './health.js'
 import { KIT_VERSION } from './kit-version.js'
-import type { Logger } from './log.js'
+import { describeError, type Logger } from './log.js'
 
 export const API_V1 = '/api/v1'
 export const TRACE_HEADER = 'x-trace-id'
@@ -32,6 +32,12 @@ export interface ApiOptions {
   before?: readonly MiddlewareHandler[]
   /** Runs inside the request scope, in front of every route including /health/* (security headers, CORS, limits). */
   middleware?: readonly MiddlewareHandler[]
+  /**
+   * Whose `traceparent` header is believed. The trace id is written into audit rows and log lines, so a caller that
+   * may choose it can plant an id of its choice there. Default: nobody — every request gets a new id. Return true for
+   * requests that came through the trusted proxy, or always when only trusted callers can reach the API.
+   */
+  trustTraceparent?: (c: Context) => boolean
 }
 
 export type Api = OpenAPIHono
@@ -50,23 +56,23 @@ export function createRouter(): OpenAPIHono {
   })
 }
 
-const traceIdOf = (c: Context): string => getContext()?.traceId ?? resolveTraceId(c.req.header('traceparent'))
+// Outside the request scope (an error before it was entered) there is no decision about the caller: a new id.
+const traceIdOf = (_c: Context): string => getContext()?.traceId ?? resolveTraceId(undefined)
 
 /** Anything that is not a deliberate ApiError: the cause (message, stack, SQL) goes to the log only. */
 function internalError(c: Context, logger: Logger, err: unknown): Response {
   logger.error('unhandled error', {
     method: c.req.method,
     path: c.req.path,
-    error: err instanceof Error ? err.message : String(err),
-    stack: err instanceof Error ? err.stack : undefined,
+    ...describeError(err), // driver messages are masked: they can quote row values
   })
   return c.json(errorBody('INTERNAL', 'Internal server error', traceIdOf(c)), 500)
 }
 
 /** Trace id + request log. Everything a request does runs inside this scope. */
-function requestScope(logger: Logger): MiddlewareHandler {
+function requestScope(logger: Logger, trustTraceparent: (c: Context) => boolean): MiddlewareHandler {
   return (c, next) => {
-    const traceId = resolveTraceId(c.req.header('traceparent'))
+    const traceId = resolveTraceId(trustTraceparent(c) ? c.req.header('traceparent') : undefined)
     return runWithContext({ traceId }, async () => {
       const start = performance.now()
       try {
@@ -101,11 +107,11 @@ const VersionSchema = z
 const json = <T extends z.ZodType>(schema: T, description: string) => ({ description, content: { 'application/json': { schema } } })
 
 export function createApi(options: ApiOptions): Api {
-  const { name, version, logger, checks = [], build = {}, before = [], middleware = [] } = options
+  const { name, version, logger, checks = [], build = {}, before = [], middleware = [], trustTraceparent = () => false } = options
   const app = createRouter()
 
   for (const handler of before) app.use(handler)
-  app.use(requestScope(logger))
+  app.use(requestScope(logger, trustTraceparent))
   for (const handler of middleware) app.use(handler)
 
   app.notFound((c) => c.json(errorBody('NOT_FOUND', `No route for ${c.req.method} ${c.req.path}`, traceIdOf(c)), 404))

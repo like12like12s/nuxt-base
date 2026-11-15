@@ -3,7 +3,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { EnvError, loadEnv, redactEnv } from '../runtime/api/env'
-import { createLogger } from '../runtime/api/log'
+import { runWithContext } from '../runtime/api/context'
+import { createLogger, describeError } from '../runtime/api/log'
 import { gracefulShutdown } from '../runtime/api/shutdown'
 
 const shape = {
@@ -61,6 +62,27 @@ describe('logger', () => {
     log.error('boom', { code: 7 })
     expect(lines).toHaveLength(1)
     expect(JSON.parse(lines[0]!)).toMatchObject({ level: 'error', msg: 'boom', code: 7 })
+  })
+
+  // L2: `fields` was spread last — a caller (or request data put into fields) could replace level / service / traceId
+  it('fields add to a line but never replace the standard ones', () => {
+    const lines: any[] = []
+    const log = createLogger('info', (l) => lines.push(JSON.parse(l)), { service: 'svc', env: 'prod' })
+    runWithContext({ traceId: 'real-trace' }, () => log.info('x', { traceId: 'spoofed', level: 'error', service: 'other', env: 'dev', msg: 'y', ts: 'never', extra: 1 }))
+    expect(lines[0]).toMatchObject({ traceId: 'real-trace', level: 'info', service: 'svc', env: 'prod', msg: 'x', extra: 1 })
+    expect(lines[0].ts).toMatch(/^\d{4}-/)
+  })
+
+  it('describeError masks the values a database driver quotes in its message; other errors are logged as they are', () => {
+    const duplicate = Object.assign(new Error("Duplicate entry 'jane@example.com' for key 'users.users_email_uq'"), { code: 'ER_DUP_ENTRY', errno: 1062, sqlMessage: 'x' })
+    const described = describeError(duplicate)
+    expect(described.error).toBe("ER_DUP_ENTRY: Duplicate entry '?' for key '?'")
+    expect(JSON.stringify(described)).not.toContain('jane@example.com')
+    expect(described.stack).toMatch(/^Error: Duplicate entry '\?'[^\n]*\n\s+at /)
+    expect(describeError(Object.assign(new Error('UNIQUE constraint failed: items.liveName'), { code: 'ERR_SQLITE_ERROR', errcode: 2067 })).error).toBe('ERR_SQLITE_ERROR: UNIQUE constraint failed: items.liveName')
+    const plain = new Error("cannot read 'x' of undefined")
+    expect(describeError(plain)).toEqual({ error: "cannot read 'x' of undefined", stack: plain.stack })
+    expect(describeError('text')).toEqual({ error: 'text' })
   })
 })
 

@@ -132,10 +132,10 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    /** @description Page size (1-200) */
+                    /** @description Page size (1-200); with ids: at least the number of ids */
                     limit?: number;
                     /** @description Rows to skip */
-                    offset?: number | null;
+                    offset?: number;
                     /** @description Comma-separated columns, - prefix = descending. Sortable: createdAt, updatedAt, name, quantity */
                     sort?: string;
                     /** @description Only these ids (comma-separated) — fetch many in one call */

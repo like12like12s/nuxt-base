@@ -113,6 +113,11 @@ export interface AuthOptions<R extends string = string> {
 export interface Auth {
   /** Mount in front of every route: `api.use('*', auth.middleware)` — a route outside the mount is not guarded at all. */
   middleware: MiddlewareHandler
+  /**
+   * true when the request provably came through the trusted proxy (secret header and/or trusted peer). Use it for
+   * other things that may only be believed from the proxy: `createApi({ trustTraceparent: auth.viaProxy })`.
+   */
+  viaProxy(c: Context): boolean
   /** How forward-auth is set up — logged at boot, never a secret. */
   describe(): { mode: 'dev-user' | 'proxy' | 'tokens-only'; proxySecret: boolean; trustedProxies: number }
 }
@@ -184,6 +189,7 @@ export function createAuth<R extends string>(options: AuthOptions<R>): Auth {
 
   return {
     middleware,
+    viaProxy: (c) => readProxy.viaProxy((name) => c.req.header(name), remoteAddress(c)),
     describe: () => ({ mode: devUser ? 'dev-user' : proxySecret || trustedProxies ? 'proxy' : 'tokens-only', proxySecret, trustedProxies }),
   }
 }

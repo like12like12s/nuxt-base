@@ -15,10 +15,10 @@ import { testClient } from '../runtime/testing/client'
 
 const HEX32 = /^[0-9a-f]{32}$/
 
-function setup(checks: HealthCheck[] = []) {
+function setup(checks: HealthCheck[] = [], options: Partial<Parameters<typeof createApi>[0]> = {}) {
   const lines: Record<string, any>[] = []
   const logger = createLogger('info', (line) => lines.push(JSON.parse(line)), { service: 'svc', env: 'test' })
-  const app = createApi({ name: 'svc', version: '1.2.3', logger, checks, build: { commit: 'abc1234', builtAt: '2026-01-01T00:00:00Z' } })
+  const app = createApi({ name: 'svc', version: '1.2.3', logger, checks, build: { commit: 'abc1234', builtAt: '2026-01-01T00:00:00Z' }, ...options })
   return { app, api: testClient(app), lines }
 }
 
@@ -35,7 +35,8 @@ describe('trace id', () => {
     const id = '4bf92f3577b34da6a3ce929d0e0e4736'
     expect(parseTraceparent(`00-${id}-00f067aa0ba902b7-01`)).toBe(id)
     expect(parseTraceparent(`00-${id.toUpperCase()}-00F067AA0BA902B7-01`)).toBe(id)
-    for (const bad of [undefined, null, '', 'abc', `00-${id}-00f067aa0ba902b7`, `00-${'0'.repeat(32)}-00f067aa0ba902b7-01`, `00-${id}x-00f067aa0ba902b7-01`]) {
+    // L1: version ff and an all-zero parent id are invalid per the W3C spec, like an all-zero trace id
+    for (const bad of [undefined, null, '', 'abc', `00-${id}-00f067aa0ba902b7`, `00-${'0'.repeat(32)}-00f067aa0ba902b7-01`, `00-${id}x-00f067aa0ba902b7-01`, `ff-${id}-00f067aa0ba902b7-01`, `00-${id}-0000000000000000-01`, `00-${id}-00f067aa0ba902b7-01-extra`]) {
       expect(parseTraceparent(bad), String(bad)).toBeUndefined()
     }
   })
@@ -201,9 +202,23 @@ describe('createApi', () => {
     expect(Object.keys(lines[0]!).sort()).toEqual(['env', 'level', 'method', 'ms', 'msg', 'path', 'service', 'status', 'traceId', 'ts'])
     expect(lines[0]).toMatchObject({ level: 'info', msg: 'request', service: 'svc', env: 'test', method: 'GET', path: '/version', status: 200, traceId: res.traceId })
     expect(res.traceId).toMatch(HEX32)
-    const traced = await api.get('/version', { headers: { traceparent: `00-${'d'.repeat(32)}-${'e'.repeat(16)}-01` } })
-    expect(traced.traceId).toBe('d'.repeat(32))
-    expect(lines[1]!.traceId).toBe('d'.repeat(32))
+  })
+
+  // L1: the trace id is written into audit rows and logs — a caller is not trusted to choose it unless the app says so
+  it('traceparent is continued only for a caller the app trusts (trustTraceparent); by default every request gets a new id', async () => {
+    const headers = { traceparent: `00-${'d'.repeat(32)}-${'e'.repeat(16)}-01` }
+    const untrusted = setup()
+    const res = await untrusted.api.get('/version', { headers })
+    expect(res.traceId).toMatch(HEX32)
+    expect(res.traceId).not.toBe('d'.repeat(32))
+    expect(untrusted.lines[0]!.traceId).toBe(res.traceId)
+    expect((await untrusted.api.get('/nope', { headers })).body.error.traceId).not.toBe('d'.repeat(32))
+
+    const trusted = setup([], { trustTraceparent: (c) => c.req.header('x-from-proxy') === 'yes' })
+    const viaProxy = await trusted.api.get('/version', { headers: { ...headers, 'x-from-proxy': 'yes' } })
+    expect(viaProxy.traceId).toBe('d'.repeat(32))
+    expect(trusted.lines[0]!.traceId).toBe('d'.repeat(32))
+    expect((await trusted.api.get('/version', { headers })).traceId).not.toBe('d'.repeat(32))
   })
 
   it('every status >= 400 has the error shape with the trace id of the response header', async () => {
@@ -269,6 +284,22 @@ describe('createApi', () => {
     expect(bad.status).toBe(400)
     expect(bad.body.error).toMatchObject({ code: 'VALIDATION', message: 'Request validation failed', traceId: bad.traceId })
     expect(bad.body.error.details.map((d: any) => d.path).sort()).toEqual(['json.name', 'json.size'])
+    // L8: query numbers are decimal digits only — nothing Number() merely tolerates
+    for (const query of ['limit=0x10', 'limit=1e2', 'limit=%205', 'limit=5.0', 'limit=', 'offset=', 'offset=1e1', 'offset=-0', 'limit=99999999999999999999']) {
+      const res = await api.get(`/api/v1/things?${query}`)
+      expect(res.status, query).toBe(400)
+      expect(res.body.error.details[0].path, query).toBe(`query.${query.split('=')[0]}`)
+    }
+    expect((await api.get('/api/v1/things?limit=007&offset=0')).body).toEqual({ data: [{ name: 'limit 7', size: 1 }] })
+    // ?ids= with more ids than the default page: all of them fit one page instead of a silent cut at 50
+    const ids = Array.from({ length: 120 }, (_, i) => `id-${i}`).join(',')
+    expect((await api.get(`/api/v1/things?ids=${ids}`)).body).toEqual({ data: [{ name: 'limit 120', size: 1 }] })
+    expect((await api.get(`/api/v1/things?ids=a,b,a&limit=1`)).body).toEqual({ data: [{ name: 'limit 2', size: 1 }] })
+    expect((await api.get('/api/v1/things?ids=a,b')).body).toEqual({ data: [{ name: 'limit 50', size: 1 }] })
+    // the contract still documents limit / offset as integers with their defaults
+    const params = (await api.get('/openapi.json')).body.paths['/api/v1/things'].get.parameters
+    expect(params.find((p: any) => p.name === 'limit').schema).toMatchObject({ type: 'integer', minimum: 1, maximum: 200, default: 50 })
+    expect(params.find((p: any) => p.name === 'offset').schema).toMatchObject({ type: 'integer', minimum: 0, default: 0 })
     const over = await api.get('/api/v1/things?limit=201&offset=-1')
     expect(over.status).toBe(400)
     expect(over.body.error.details.map((d: any) => d.path).sort()).toEqual(['query.limit', 'query.offset'])

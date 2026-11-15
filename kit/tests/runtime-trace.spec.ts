@@ -20,10 +20,11 @@ afterEach(async () => {
   setTraceIdProvider(() => undefined)
 })
 
-function app() {
+// `trust` = the app believes every caller's traceparent (createApi and the trace middleware share the predicate)
+function app(trust = false) {
   const lines: Record<string, any>[] = []
   const logger = createLogger('info', (line) => lines.push(JSON.parse(line)), { service: 'svc', env: 'test' })
-  const api = createApi({ name: 'svc', version: '1.0.0', logger, before: [traceMiddleware()] })
+  const api = createApi({ name: 'svc', version: '1.0.0', logger, trustTraceparent: () => trust, before: [traceMiddleware({ trustParent: () => trust })] })
   api.get('/api/v1/things/:id', (c) => c.json({ data: { id: c.req.param('id') } }))
   api.get('/api/v1/missing/:id', () => { throw notFound('Thing', 'x') })
   api.get('/api/v1/boom', () => { throw new Error('kaboom') })
@@ -62,10 +63,10 @@ describe('configuration', () => {
 })
 
 describe('off', () => {
-  it('without an endpoint nothing starts, and requests work as before (generated trace id, traceparent honoured)', async () => {
+  it('without an endpoint nothing starts, and requests work as before (generated trace id, a trusted traceparent honoured)', async () => {
     expect(startTracing({ serviceName: 'svc-api', env: {} })).toBe(false)
     expect(tracingActive()).toBe(false)
-    const { api } = app()
+    const { api } = app(true)
     expect((await api.get('/api/v1/things/1')).traceId).toMatch(HEX32)
     const incoming = 'ab'.repeat(16)
     expect((await api.get('/api/v1/things/1', { headers: { traceparent: `00-${incoming}-${'cd'.repeat(8)}-01` } })).traceId).toBe(incoming)
@@ -90,7 +91,7 @@ describe('on — spans reach the collector', () => {
       name: 'GET /api/v1/things/:id',
       kind: 2, // SPAN_KIND_SERVER
       service: 'svc-api',
-      attributes: { 'http.request.method': 'GET', 'url.path': '/api/v1/things/42', 'http.route': '/api/v1/things/:id', 'http.response.status_code': 200 },
+      attributes: { 'http.request.method': 'GET', 'http.route': '/api/v1/things/:id', 'http.response.status_code': 200 }, // L16: no raw url.path (it can carry a token)
     })
     expect(JSON.stringify(spans)).not.toContain('abc') // no query string in a span either
     const logged = lines.filter((l) => l.msg === 'request')
@@ -98,13 +99,32 @@ describe('on — spans reach the collector', () => {
     expect(logged[0]!.traceId).toBe(res.traceId)
   })
 
-  it('continues the caller\'s trace: same trace id, the caller\'s span as parent', async () => {
+  it('continues a trusted caller\'s trace: same trace id, the caller\'s span as parent', async () => {
     const otlp = await tracing()
     const traceId = '4bf92f3577b34da6a3ce929d0e0e4736'
-    const res = await app().api.get('/api/v1/things/1', { headers: { traceparent: `00-${traceId}-00f067aa0ba902b7-01` } })
+    const res = await app(true).api.get('/api/v1/things/1', { headers: { traceparent: `00-${traceId}-00f067aa0ba902b7-01` } })
     await flushTracing()
     expect(res.traceId).toBe(traceId)
     expect(otlp.spans()[0]).toMatchObject({ traceId, parentSpanId: '00f067aa0ba902b7' })
+  })
+
+  // L1: an untrusted caller neither chooses the trace id nor forces the export with the sampled flag
+  it('an untrusted caller\'s traceparent starts no trace of its choosing: new id, no parent, and the sample ratio still applies', async () => {
+    const otlp = await tracing()
+    const claimed = '4bf92f3577b34da6a3ce929d0e0e4736'
+    const res = await app().api.get('/api/v1/things/1', { headers: { traceparent: `00-${claimed}-00f067aa0ba902b7-01` } })
+    await flushTracing()
+    expect(res.traceId).toMatch(HEX32)
+    expect(res.traceId).not.toBe(claimed)
+    expect(otlp.spans()).toHaveLength(1)
+    expect(otlp.spans()[0]!.traceId).toBe(res.traceId)
+    expect(otlp.spans()[0]!.parentSpanId).toBeUndefined()
+    await stopTracing()
+
+    const none = await tracing({ OTEL_TRACES_SAMPLER_ARG: '0' })
+    await app().api.get('/api/v1/things/2', { headers: { traceparent: `00-${claimed}-00f067aa0ba902b7-01` } })
+    await flushTracing()
+    expect(none.spans()).toEqual([]) // the `-01` (sampled) flag of a stranger does not export anything
   })
 
   it('errors: the error body, the log line and the span agree on the trace id; a 5xx marks the span as failed', async () => {
@@ -133,7 +153,7 @@ describe('on — spans reach the collector', () => {
 
   it('a ratio of 0 exports nothing for new traces but still keeps a sampled caller; the trace id stays consistent', async () => {
     const otlp = await tracing({ OTEL_TRACES_SAMPLER_ARG: '0' })
-    const { api, lines } = app()
+    const { api, lines } = app(true)
     const dropped = await api.get('/api/v1/things/1')
     const traceId = 'cd'.repeat(16)
     const kept = await api.get('/api/v1/things/2', { headers: { traceparent: `00-${traceId}-${'ef'.repeat(8)}-01` } })

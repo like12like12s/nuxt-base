@@ -12,7 +12,9 @@ GET /openapi.json    the contract (same content as the committed openapi.json)
   `UNAUTHORIZED` `FORBIDDEN` `NOT_FOUND` `CONFLICT` `RATE_LIMITED` `INTERNAL`. Handlers `throw notFound('Item', id)` /
   `conflict(...)` / `validation(...)` (`src/kit/api/errors.ts`); anything else becomes a 500 that shows no cause.
   A 503 from `/health/ready` uses `INTERNAL` with the check list in `details`.
-- Trace id: taken from `traceparent`, else generated; returned in `x-trace-id`; on every log line of the request
+- Trace id: generated — or taken from `traceparent` when the caller is trusted to choose it (a request through the
+  trusted proxy of the `auth` module, or every caller with `TRUST_TRACEPARENT=1` on an API only trusted clients
+  reach); returned in `x-trace-id`; on every log line of the request
   (`ts level msg service env traceId method path status ms`) and in the audit row. Quote it to find a request.
 - Lists: `?limit=50&offset=0&sort=-createdAt` (limit 1-200; out-of-range is a 400, never clamped) and `?ids=a,b` for
   many in one call -> `{ data: [...], meta: { limit, offset, total } }`. One object -> `{ data: {...} }`.

@@ -43,6 +43,10 @@ export function parseSort<C extends string>(value: string, sortable: readonly C[
   return terms
 }
 
+// Query numbers are plain decimal digits. Anything else that Number() would happily read — `0x10`, `1e2`, ` 5 `,
+// an empty `offset=` — is not a number here and fails validation (400) instead of meaning something surprising.
+const decimal = (value: unknown): unknown => (value === undefined ? undefined : typeof value === 'string' && /^\d{1,9}$/.test(value) ? Number(value) : typeof value === 'number' ? value : Number.NaN)
+
 /**
  * A list endpoint's query: `const list = listQuery({ sortable: [...], defaultSort: '-createdAt' })`, then
  * `request: { query: list.schema }` in the route and `list.parse(c.req.valid('query'))` in the handler.
@@ -51,8 +55,8 @@ export function listQuery<const C extends string>(options: { sortable: readonly 
   const { sortable, defaultSort } = options
   if (!parseSort(defaultSort, sortable)) throw new Error(`listQuery: defaultSort "${defaultSort}" is not made of sortable columns`)
   const schema = z.object({
-    limit: z.coerce.number().int().min(1).max(MAX_LIMIT).default(DEFAULT_LIMIT).openapi({ description: `Page size (1-${MAX_LIMIT})`, example: DEFAULT_LIMIT }),
-    offset: z.coerce.number().int().min(0).default(0).openapi({ description: 'Rows to skip', example: 0 }),
+    limit: z.preprocess(decimal, z.number().int().min(1).max(MAX_LIMIT).default(DEFAULT_LIMIT)).openapi({ description: `Page size (1-${MAX_LIMIT}); with ids: at least the number of ids`, example: DEFAULT_LIMIT }),
+    offset: z.preprocess(decimal, z.number().int().min(0).default(0)).openapi({ description: 'Rows to skip', example: 0 }),
     sort: z
       .string()
       .default(defaultSort)
@@ -66,12 +70,16 @@ export function listQuery<const C extends string>(options: { sortable: readonly 
       })
       .openapi({ description: 'Only these ids (comma-separated) — fetch many in one call', example: 'a,b' }),
   })
-  const parse = (query: z.infer<typeof schema>): ListParams<C> => ({
-    limit: query.limit,
-    offset: query.offset,
-    sort: parseSort(query.sort, sortable) ?? [],
-    ...(query.ids === undefined ? {} : { ids: [...new Set(query.ids.split(',').map((id) => id.trim()))] }),
-  })
+  const parse = (query: z.infer<typeof schema>): ListParams<C> => {
+    const ids = query.ids === undefined ? undefined : [...new Set(query.ids.split(',').map((id) => id.trim()))]
+    return {
+      // `?ids=` asks for exactly those records: they all fit one page (MAX_IDS <= MAX_LIMIT), never a silent cut at 50.
+      limit: ids ? Math.max(query.limit, ids.length) : query.limit,
+      offset: query.offset,
+      sort: parseSort(query.sort, sortable) ?? [],
+      ...(ids === undefined ? {} : { ids }),
+    }
+  }
   return { schema, parse }
 }
 

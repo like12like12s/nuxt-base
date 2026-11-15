@@ -306,20 +306,17 @@
               "minimum": 1,
               "maximum": 200,
               "default": 50,
-              "description": "Page size (1-200)",
+              "description": "Page size (1-200); with ids: at least the number of ids",
               "example": 50
             },
             "required": false,
-            "description": "Page size (1-200)",
+            "description": "Page size (1-200); with ids: at least the number of ids",
             "name": "limit",
             "in": "query"
           },
           {
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "minimum": 0,
               "default": 0,
               "description": "Rows to skip",

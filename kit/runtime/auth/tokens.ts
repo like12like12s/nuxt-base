@@ -42,8 +42,11 @@ export async function createServiceToken(db: Kysely<any>, input: NewToken): Prom
   const name = input.name.trim()
   if (!name) throw new Error('a service token needs a name')
   if (input.expiresAt && Number.isNaN(Date.parse(input.expiresAt))) throw new Error('expiresAt is not a date')
+  // Stored as UTC ISO-8601 (…Z), like every timestamp: expiry is a string comparison with now(), so a value with
+  // an offset (`+07:00`) or without a zone would expire hours early or late.
+  const expiresAt = input.expiresAt ? new Date(input.expiresAt).toISOString() : null
   const token = generateToken()
-  const row = { ...created(), hash: hashToken(token), name, roles: toJson([...input.roles]), expiresAt: input.expiresAt ?? null, revokedAt: null, lastUsedAt: null }
+  const row = { ...created(), hash: hashToken(token), name, roles: toJson([...input.roles]), expiresAt, revokedAt: null, lastUsedAt: null }
   const saved = await audited(db, { action: 'service_token.create', target: `service_token:${row.id}` }, async (trx) => {
     await trx.insertInto('service_tokens').values(row).execute()
     const after = record((await trx.selectFrom('service_tokens').select(COLUMNS).where('id', '=', row.id).executeTakeFirstOrThrow()) as Row)

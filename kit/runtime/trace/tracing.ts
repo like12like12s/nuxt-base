@@ -18,7 +18,7 @@ import { W3CTraceContextPropagator } from '@opentelemetry/core'
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
 import { resourceFromAttributes } from '@opentelemetry/resources'
 import { BatchSpanProcessor, ParentBasedSampler, TraceIdRatioBasedSampler, TracerProvider } from '@opentelemetry/sdk-trace'
-import type { MiddlewareHandler } from 'hono'
+import type { Context, MiddlewareHandler } from 'hono'
 import { routePath } from 'hono/route'
 import { hostname } from 'node:os'
 import { setTraceIdProvider } from '../api/context.js'
@@ -111,17 +111,25 @@ const HEADERS: TextMapGetter<Headers> = {
 }
 
 /**
- * One SERVER span per request, continuing the caller's trace (`traceparent`). Pass it to createApi({ before: [...] })
- * so it wraps the request scope: the scope then takes its trace id from this span. Without startTracing() it does nothing.
+ * One SERVER span per request. Pass it to createApi({ before: [...] }) so it wraps the request scope: the scope then
+ * takes its trace id from this span. Without startTracing() it does nothing.
+ * The caller's trace (`traceparent`) is continued only when `trustParent` says the caller may choose it — the same
+ * predicate as createApi's `trustTraceparent`. A sampled `traceparent` from anyone else would otherwise put an id of
+ * the caller's choice into the audit trail and force the span to be exported whatever the sample ratio is. For an
+ * untrusted caller the span starts a new trace and keeps the caller's context as a span LINK.
  */
-export function traceMiddleware(options: { ignore?: RegExp } = {}): MiddlewareHandler {
+export function traceMiddleware(options: { ignore?: RegExp; trustParent?: (c: Context) => boolean } = {}): MiddlewareHandler {
   const ignore = options.ignore ?? UNTRACED
+  const trustParent = options.trustParent ?? (() => false)
   return async (c, next) => {
     if (!provider || ignore.test(c.req.path)) return next()
     const method = c.req.method
-    const parent = propagation.extract(context.active(), c.req.raw.headers, HEADERS)
+    const remote = propagation.extract(context.active(), c.req.raw.headers, HEADERS)
+    const trusted = trustParent(c)
+    const claimed = trace.getSpanContext(remote)
+    const links = !trusted && claimed && isSpanContextValid(claimed) ? [{ context: claimed }] : []
     const tracer = trace.getTracer('nuxt-base-kit')
-    await tracer.startActiveSpan(method, { kind: SpanKind.SERVER, attributes: { 'http.request.method': method, 'url.path': c.req.path } }, parent, async (span) => {
+    await tracer.startActiveSpan(method, { kind: SpanKind.SERVER, attributes: { 'http.request.method': method }, links }, trusted ? remote : context.active(), async (span) => {
       try {
         await next()
       } finally {
@@ -137,6 +145,9 @@ export function traceMiddleware(options: { ignore?: RegExp } = {}): MiddlewareHa
           span.setAttribute('http.route', route)
           span.updateName(`${method} ${route}`)
         }
+        // No `url.path`: the raw path can carry a secret (/reset/<token>, a signed link) and a trace backend is read
+        // by more people than the request log. The declared route above says which endpoint it was.
+
         span.setAttribute('http.response.status_code', status)
         if (c.error) span.recordException(c.error)
         if (status >= 500) span.setStatus({ code: SpanStatusCode.ERROR })

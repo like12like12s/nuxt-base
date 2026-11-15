@@ -192,6 +192,20 @@ describe.each(DIALECTS)('service tokens (%s)', (dialect) => {
     await expect(createServiceToken(db, { name: '  ', roles: [] })).rejects.toThrow(/needs a name/)
   })
 
+  // L10: expiry is a string comparison with now() — a value with an offset expired hours early or late
+  it('expiresAt is stored as UTC whatever form it was given in', async () => {
+    const database = await testDb('sqlite')
+    setClock(() => new Date('2026-06-01T00:30:00.000Z'))
+    // 07:00 in Bangkok = 00:00 UTC: already past at 00:30 UTC, although the string "2026-06-01T07:…" sorts after now()
+    const past = await createServiceToken(database.db, { name: 'offset', roles: [], expiresAt: '2026-06-01T07:00:00+07:00' })
+    expect(past.expiresAt).toBe('2026-06-01T00:00:00.000Z')
+    expect(await verifyServiceToken(database.db, past.token)).toEqual({ ok: false, reason: 'expired' })
+    const future = await createServiceToken(database.db, { name: 'offset-2', roles: [], expiresAt: '2026-06-01T08:00:00+07:00' })
+    expect(future.expiresAt).toBe('2026-06-01T01:00:00.000Z')
+    expect((await verifyServiceToken(database.db, future.token)).ok).toBe(true)
+    await expect(createServiceToken(database.db, { name: 'bad', roles: [], expiresAt: 'tomorrow-ish' })).rejects.toThrow(/not a date/)
+  })
+
   it('revoke: by id or by name, at once, audited, and the row stays', async () => {
     const { db } = await testDb(dialect)
     const a = await createServiceToken(db, { name: 'worker', roles: ['editor'] })
@@ -440,6 +454,20 @@ describe('who is believed', () => {
     // default (no injected peer): an in-process request has no socket, so it is not trusted
     const noSocket = await setup({ proxy: { trustedProxies: ['192.0.2.10'] } })
     expect((await testClient(noSocket.app, { headers: authentik('alice', 'app-admins') }).get('/api/v1/things')).status).toBe(401)
+  })
+
+  it('viaProxy(): true only for a request that came through the trusted proxy — with or without an identity', async () => {
+    const t = await setup()
+    const seen: boolean[] = []
+    t.app.get('/probe', publicRoute(), (c) => { seen.push(t.auth.viaProxy(c)); return c.json({ data: 'ok' }) })
+    await testClient(t.app, { headers: { [PROXY_SECRET_HEADER]: SECRET } }).get('/probe')
+    await t.as('alice', 'app-admins').get('/probe')
+    await t.anonymous.get('/probe')
+    await testClient(t.app, { headers: { [PROXY_SECRET_HEADER]: 'guess' } }).get('/probe')
+    expect(seen).toEqual([true, true, false, false])
+    const unconfigured = await setup({ proxy: {} })
+    unconfigured.app.get('/probe', publicRoute(), (c) => c.json({ data: unconfigured.auth.viaProxy(c) }))
+    expect((await unconfigured.as('alice', 'app-admins').get('/probe')).body.data).toBe(false)
   })
 
   it('a trusted user is upserted with the mapped roles and becomes the audit actor', async () => {
