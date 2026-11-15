@@ -4,6 +4,13 @@ description: Change history of nuxt-base (newest first)
 ---
 # nuxt-base — Changelog
 
+### t1106 — review fix round 1 (review t1097: High 3, Medium 14, Low 19; epic t1092)
+- H1 (29f0f55): a COMMIT whose acknowledgement is lost is never replayed — error `COMMIT_OUTCOME_UNKNOWN` (before: write + audit applied twice) · H2 (a1d9ff0): SQLite pre-migrate backup = `VACUUM INTO` + `integrity_check`, a failed backup refuses the migration (exit 3) · H3 (8c94d06, a253a0f): job lock by atomic `link()` per generation — 12-process race test, 1 holder every round
+- M1/M2/M14 (fae1a0a): `--context`, title, description validated (hostile values refused; stored answers of existing projects only warn); no `container_name` in compose templates (two stages on one host); generated README + `next[]` say the repo must stay private · M3 (523f12d): CI runs gitleaks for real, `npm ci`, actions pinned by SHA · M4/M13 (0e28974): rate limit per client only through the trusted proxy (fullstack default off); auth fail-closed on every path, declaration must be the first handler · M5 (f8d3022): og URLs only from `NUXT_PUBLIC_SITE_URL` · M6/M7 (21324e0): MySQL timeout kills the server-side query; SQLite lock waits no longer block the event loop · M8 (42b0c7e): live-unique via generated column + UNIQUE index, duplicate → 409
+- L1–L16 all fixed (client `traceparent` trusted only via the proxy or `TRUST_TRACEPARENT=1`; log fields cannot override standard ones; symlink-safe update; UI security headers; reserved words refused by generators; public guard also scans `.memory/` + README)
+- Tests: gate 462 unit (5 MySQL-only skipped) + 4 e2e · `gate:kit` 18/18 twice in a row · GitHub Actions green
+- Upgrade notes for v0.2.0 projects (app-owned files are not rewritten by `update`): mount auth on `*`; set `NUXT_PUBLIC_SITE_URL`; port the items live-unique pattern by hand; drop `container_name` from compose; job locks are now `<name>.lock.<n>`
+
 ## 2026-11-16
 
 ### v0.2.0 — first kit release (epic t1092)
