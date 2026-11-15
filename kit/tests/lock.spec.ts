@@ -189,7 +189,7 @@ describe('update', () => {
     const r = cli(['update', dir, '--json'], { kit })
     expect(r.status).toBe(0)
     expect(r.json.updated).toEqual(['api/src/kit/api/log.ts'])
-    expect(r.json.kit).toEqual({ from: '1.0.0', to: '1.2.0' })
+    expect(r.json.kit).toEqual({ from: '1.0.0', to: '1.2.0', commit: null, unreleased: false })
     expect(r.json.layer).toEqual({ from: 'github:like12like12s/nuxt-base#v1.0.0', to: 'github:like12like12s/nuxt-base#v1.2.0', file: 'ui/nuxt.config.ts' })
     expect(read(dir, 'ui/nuxt.config.ts')).toContain(`extends: ['github:like12like12s/nuxt-base#v1.2.0']`)
     expect(read(dir, 'api/src/kit/api/log.ts')).toContain('// kit 1.2')

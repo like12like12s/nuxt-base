@@ -11,8 +11,8 @@ const USAGE = `usage:
   scaffold new <name> --kind nuxt-app|api|fullstack [--with a,b,c] [--db sqlite|mysql]
            [--deploy cf-pages|container|pm2] [--port N] [--api-port N] --dir <target> [--context ctx.json] [--dry-run] [--json]
   scaffold add resource|page|job <name> [--dir <project>] [--json]
-  scaffold check [<dir>] [--json]      exit 0 clean, 1 drift
-  scaffold update [<dir>] [--json]     re-copy locked files + bump the layer tag
+  scaffold check [<dir>] [--json]      exit 0 clean, 1 drift (names the kit version + commit it compared against)
+  scaffold update [<dir>] [--json]     re-copy locked files + bump the layer tag; prints the by-hand notes of UPGRADING.md
   scaffold list [--json]
 exit codes: 0 ok, 1 drift (check), 2 usage, 3 target dir not empty, 4 unknown/incompatible kind, module or preset,\n            70 internal error (a kit bug — never reported as drift)`
 
@@ -99,20 +99,33 @@ async function run(argv) {
   }
 }
 
+const against = (version, kit) => `kit ${version}${kit.commit ? ` @ ${kit.commit.slice(0, 7)}` : ''}${kit.unreleased ? ', unreleased changes' : ''}`
+
 function text(result) {
   const lines = []
   if (result.files && result.kind) {
     lines.push(`${result.dryRun ? 'would scaffold' : 'scaffolded'} ${result.name} (${result.kind}; modules ${result.modules.join(', ')}; deploy ${result.deploy ?? 'none'}) -> ${result.dir}`)
     lines.push(`${result.files.length} files, ${result.locked.length} locked`, 'next:', ...result.next.map((n) => `  ${n}`))
   } else if (result.drift) {
-    lines.push(result.clean ? `clean (kit ${result.kit.current})` : `drift (kit ${result.kit.current}):`)
+    // Always: which kit this was compared against — version, commit (when the kit dir is a git checkout), released or not.
+    lines.push(`${result.clean ? 'clean' : 'drift'} (${against(result.kit.current, result.kit)})${result.clean ? '' : ':'}`)
     for (const d of result.drift) lines.push(`  ${d.reason}  ${d.path}`)
     if (result.layer?.behind) lines.push(`  layer-behind  ${result.layer.current} -> ${result.layer.latest}`)
+    if (result.unreleased.length) {
+      lines.push(`  kit has unreleased changes — ${result.unreleased.length} locked file(s) differ from this kit's working tree, not from a release (not project drift):`)
+      for (const d of result.unreleased) lines.push(`    ${d.reason}  ${d.path}`)
+    }
+    if (result.kit.note) lines.push(`  note: ${result.kit.note}`)
     for (const w of result.warnings ?? []) lines.push(`  warning: ${w}`)
   } else if (result.updated) {
-    lines.push(`updated ${result.updated.length} locked file(s)${result.layer ? `, layer ${result.layer.from} -> ${result.layer.to}` : ''}`)
+    lines.push(`updated ${result.updated.length} locked file(s)${result.layer ? `, layer ${result.layer.from} -> ${result.layer.to}` : ''} (${against(result.kit.to, result.kit)})`)
     for (const p of result.updated) lines.push(`  ${p}`)
     for (const p of result.orphaned) lines.push(`  no longer locked by the kit (left in place): ${p}`)
+    for (const section of result.notes) {
+      lines.push(`by hand — kit ${section.from} -> ${section.to} (app-owned files are never rewritten; kit/UPGRADING.md):`)
+      for (const item of section.items) lines.push(`  - ${item}`)
+    }
+    if (result.kit.note) lines.push(`  note: ${result.kit.note}`)
     for (const w of result.warnings) lines.push(`  warning: ${w}`)
   } else if (result.kinds) {
     lines.push(`kit ${result.kitVersion}`, `kinds: ${result.kinds.map((k) => k.name).join(', ')}`)

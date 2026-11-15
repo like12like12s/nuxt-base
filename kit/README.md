@@ -25,7 +25,8 @@ node <KIT>/bin/scaffold.mjs list [--json]              kinds, modules, deploy pr
 ```
 exit  meaning
 0     ok
-1     drift — `check` only: a locked file was edited / is missing / is behind the kit, or the layer tag is behind
+1     drift — `check` only: a locked file was edited / is missing / is behind a RELEASED kit, or the layer tag is
+      behind. (Differences caused by unreleased work in the kit directory are not drift — exit 0, state `kit-unreleased`.)
 2     usage — bad flag or name, missing --kind / --dir, not a scaffolded project (check / update / add),
       `add`: a `kit:anchor` comment the generator needs was removed (code `anchor_missing`; nothing is written)
 3     the target dir exists and is not empty (`new`) · a generator's output file already exists (`add`)
@@ -43,9 +44,12 @@ new     { ok, dir, name, title, description, kind, modules[], db, deploy, kitVer
           (+ "dryRun": true with --dry-run — same plan, nothing written)
 add     { ok, dir, type, name, generator, files[], patched[], next[] }
           (files = created, patched = existing app-owned files edited at a `kit:anchor` comment)
-check   { ok, dir, clean, kit: { project, current }, layer: { current, latest, behind } | null,
-          drift[{ path, reason: "modified"|"missing"|"outdated"|"new-in-kit"|"removed-from-kit" }], warnings[] }
-update  { ok, dir, kit: { from, to }, updated[], orphaned[], layer: { from, to, file } | null, warnings[] }
+check   { ok, dir, clean, state: "clean"|"drift"|"kit-unreleased",
+          kit: { project, current, commit: "<sha>"|null, unreleased, note? }, layer: { current, latest, behind } | null,
+          drift[{ path, reason: "modified"|"missing"|"outdated"|"new-in-kit"|"removed-from-kit" }],
+          unreleased[{ path, reason: "outdated"|"new-in-kit"|"removed-from-kit" }], warnings[] }
+update  { ok, dir, kit: { from, to, commit, unreleased, note? }, updated[], orphaned[],
+          layer: { from, to, file } | null, notes[{ from, to, items[] }], warnings[] }
 list    { ok, kitVersion, layerRef, kinds[{ name, description, parts[{ type, dir }] }],
           modules[{ name, status: "ready"|"planned", implicit, kinds[], requires[], generators[], description }],
           deploy[{ name, kinds[], description }], generators[] }
@@ -100,6 +104,29 @@ layer.behind      the project's layer tag is older than the kit's (only for gith
                   a local path or a newer tag is left alone)
 ```
 
+**Which kit was that?** Every `check` / `update` names the kit it compared against: `kit.current` (the version) and
+`kit.commit` (the HEAD of the kit's repository; `null` when the kit directory is not a git checkout — an exported
+release). The text form starts with it: `clean (kit 0.2.0 @ 3baed5a)`.
+
+**A kit with unreleased changes is its own state.** When the kit directory is a checkout whose `kit/` differs from
+the release tag of its version (`v<version>`: commits after the tag, an edited working tree, untracked files — or no
+such tag at all), `kit.unreleased` is `true` and `kit.note` says why. For a project generated from that same version,
+differences that come from the kit side (`outdated`, `new-in-kit`, `removed-from-kit`) are then **not drift**: they
+are listed in `unreleased[]`, `state` is `kit-unreleased`, `clean` stays `true` and the exit code stays `0`. Only
+what the project itself did (`modified`, `missing`, an older layer tag) is drift. A project that is behind a
+*released* version is drift as always, whatever else is in the kit's tree. `update` applies both lists — it brings
+the project to the kit it was given — and reports `kit.unreleased` so that is never a surprise.
+
+**Consumers read the kit from a release tag.** Point `AI_KIT_DIR` at a checkout (or an export) of the tag
+`v<version>`, not at a working tree that is being developed: then `kit.unreleased` is `false`, `check` compares
+projects with a release, and a kit change reaches projects only through a version bump (see "Releasing"). The
+`ai scaffold` wrapper does this; the working tree is for `npm run gate:kit` and for developing the kit.
+
+**Upgrade notes.** `update` cannot change app-owned files. `kit/UPGRADING.md` lists, per version step
+(`## <from> -> <to>`), what a project owner changes by hand; `update` returns the steps a project crosses as
+`notes[]` (oldest first) and prints them. A project at version P updated by kit K gets the section `<from> -> …`
+when `P <= from` and the kit is past `from` (`K > from`, or `K == from` with unreleased changes — the `-> next` step).
+
 `layer.current` is the tag the UI's `nuxt.config.ts` really extends (the oldest one when it names several);
 `.scaffold.json` is only consulted when the config names no tag of the layer. A tag edited by hand to an older one is
 therefore drift even though the manifest still records the new one.
@@ -114,6 +141,8 @@ It does not change `package.json` — dependency bumps stay a deliberate, review
 ```
 bin/scaffold.mjs        the CLI (argument parsing, output, exit codes)
 lib/                    kit.mjs (load the tree) · compose.mjs (selection -> files) · commands.mjs · render / pkg / fsutil / errors
+                        · source.mjs (which commit the kit is, released or not) · upgrading.mjs (UPGRADING.md -> notes)
+UPGRADING.md            what a project owner changes by hand per version step — printed by `update`
 kinds/<name>/           kind.json + files/           nuxt-app · api · fullstack
 modules/<name>/         module.json (+ files/, variants/, generators/)   base (always) · ci-github · api · db · testkit ·
                         auth · trace · security · og · jobs · notify
@@ -426,14 +455,20 @@ One git tag versions the layer and the kit. A release changes what `scaffold che
 files become `outdated`, the layer tag `behind`), so it is a deliberate step:
 
 1. Green on the commit to release: `npm run gate` and `npm run gate:kit`.
-2. Bump the version in **both** places, to the same value: `package.json` (`version`) and the locked
+2. In `kit/UPGRADING.md`, rename the `## <last> -> next` heading to `## <last> -> X.Y.Z` (the notes written since the
+   last release now belong to this one) — new notes after the release start a fresh `## X.Y.Z -> next` section.
+3. Bump the version in **both** places, to the same value: `package.json` (`version`) and the locked
    `kit/runtime/api/kit-version.ts` (`KIT_VERSION` — what `GET /version` of every app reports). A unit test
    (`runtime-api.spec.ts`, "kit version") fails while they differ. Run `npm install` so `package-lock.json` follows.
-3. Commit (`release vX.Y.Z`), tag `vX.Y.Z` on that commit, push the branch and the tag. The tag must exist on GitHub
+4. Commit (`release vX.Y.Z`), tag `vX.Y.Z` on that commit, push the branch and the tag. The tag must exist on GitHub
    before any project is generated with it: a generated UI extends `github:like12like12s/nuxt-base#vX.Y.Z`.
-4. `npm run gate:kit` once more after the tag is pushed: the `layer: 'tag'` combos (container images) build against
+5. `npm run gate:kit` once more after the tag is pushed: the `layer: 'tag'` combos (container images) build against
    the newest tag, so this is the run that proves the released layer and the released kit together.
-5. Consumers: `scaffold check` now reports drift in generated projects; `scaffold update` + their gate brings each one
-   up. Layer-only consumers bump the tag in their `extends`.
+6. Consumers (they read the kit from the new tag): `scaffold check` now reports drift in generated projects;
+   `scaffold update` brings each one up and prints the by-hand notes of the step; then their gate. Layer-only
+   consumers bump the tag in their `extends`.
+
+Between releases the locked runtime may change freely on the branch: nothing reads it but the kit's own gates, and a
+checkout that is not at a tag says so (`kit.unreleased`). Do not bump the version for work in progress.
 
 Never move or re-use a tag. A wrong release is fixed by the next patch version.

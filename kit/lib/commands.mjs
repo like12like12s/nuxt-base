@@ -7,6 +7,8 @@ import { EXIT, existsError, incompatible, usageError } from './errors.mjs'
 import { bareHash, inside, isEmptyOrMissing, pathExists, readJson, sha256, symlinkUnder, toJson, writeFileUnder } from './fsutil.mjs'
 import { GENERATOR_TYPES, LAYER_REPO, isBehind } from './kit.mjs'
 import { reservedName } from './names.mjs'
+import { kitSource } from './source.mjs'
+import { upgradeNotes } from './upgrading.mjs'
 
 const MANIFEST = '.scaffold.json'
 const NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/
@@ -93,24 +95,51 @@ function diff(kit, dir) {
     layer = { current, latest: kit.layerRef, behind: isBehind(current, kit.layerRef) }
     fromConfig = inConfig !== null
   }
-  return { manifest, plan, drift, layer, fromConfig }
+  // Differences that come from the KIT side (it ships another version of a file, a new one, one less) are project
+  // drift only when a release caused them. With a kit that has unreleased work on top of the very version the project
+  // was generated from, they say nothing about the project: they are reported apart, and are not drift.
+  const source = kitSource(kit)
+  const unreleased = []
+  if (source.unreleased && (manifest.kit ?? null) === kit.version) {
+    for (let i = drift.length - 1; i >= 0; i--) {
+      if (['outdated', 'new-in-kit', 'removed-from-kit'].includes(drift[i].reason)) unreleased.unshift(...drift.splice(i, 1))
+    }
+  }
+  return { manifest, plan, drift, unreleased, layer, fromConfig, source, warnings: [...plan.warnings] }
 }
+
+// `kit` of check / update: the version(s), the commit of the kit directory (null when it is not a git checkout),
+// whether that kit has work no release has, and — when it does — a sentence saying what and where to read it instead.
+// Not in `warnings[]`: those are about the project (its stored answers); this is about the kit that was used.
+const kitInfo = (kit, source, extra) => ({
+  ...extra,
+  commit: source.commit,
+  unreleased: source.unreleased,
+  ...(source.unreleased
+    ? { note: `the kit at ${kit.root} has unreleased changes (${source.why}; commit ${source.commit?.slice(0, 7) ?? 'unknown'}) — read the kit from the release tag ${source.tag} to compare a project with a release` }
+    : {}),
+})
 
 export function cmdCheck(kit, opts) {
   const dir = resolve(opts.dir ?? '.')
-  const { manifest, plan, drift, layer } = diff(kit, dir)
+  const { manifest, drift, unreleased, layer, source, warnings } = diff(kit, dir)
   const clean = drift.length === 0 && !layer?.behind
-  return { exit: clean ? EXIT.OK : EXIT.DRIFT, result: { ok: true, dir, clean, kit: { project: manifest.kit ?? null, current: kit.version }, layer, drift, warnings: plan.warnings } }
+  // `kit-unreleased`: the project itself is clean — what differs is work in the kit that no release has yet.
+  const state = !clean ? 'drift' : unreleased.length ? 'kit-unreleased' : 'clean'
+  return {
+    exit: clean ? EXIT.OK : EXIT.DRIFT,
+    result: { ok: true, dir, clean, state, kit: kitInfo(kit, source, { project: manifest.kit ?? null, current: kit.version }), layer, drift, unreleased, warnings },
+  }
 }
 
 // Re-copy locked files from the current kit and bump the layer tag. App-owned files are never touched, nothing is deleted.
 export function cmdUpdate(kit, opts) {
   const dir = resolve(opts.dir ?? '.')
-  const { manifest, plan, drift, layer, fromConfig } = diff(kit, dir)
+  const { manifest, plan, drift, unreleased, layer, fromConfig, source, warnings } = diff(kit, dir)
   const updated = []
   const orphaned = []
-  const warnings = [...plan.warnings]
-  for (const { path, reason } of drift) {
+  // update brings the project to THIS kit, released or not (the warning says which) — both lists are applied.
+  for (const { path, reason } of [...drift, ...unreleased].sort((a, b) => (a.path < b.path ? -1 : 1))) {
     if (reason === 'removed-from-kit') { orphaned.push(path); continue }
     writeFileUnder(dir, path, plan.files.find((f) => f.path === path).content)
     updated.push(path)
@@ -133,7 +162,9 @@ export function cmdUpdate(kit, opts) {
   else if (fromConfig && !layer.behind) next.layerRef = layer.current
   const text = toJson(next)
   if (text !== readFileSync(join(dir, MANIFEST), 'utf8')) writeFileSync(join(dir, MANIFEST), text)
-  return { exit: EXIT.OK, result: { ok: true, dir, kit: { from: manifest.kit ?? null, to: kit.version }, updated, orphaned, layer: layerChange, warnings } }
+  // What update cannot do: changes in files the app owns. kit/UPGRADING.md lists them per version step.
+  const notes = upgradeNotes(kit, manifest.kit ?? null, source.unreleased)
+  return { exit: EXIT.OK, result: { ok: true, dir, kit: kitInfo(kit, source, { from: manifest.kit ?? null, to: kit.version }), updated, orphaned, layer: layerChange, notes, warnings } }
 }
 
 export function cmdList(kit) {

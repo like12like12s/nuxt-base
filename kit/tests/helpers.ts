@@ -40,6 +40,26 @@ export function cloneKit(version = '9.9.9'): string {
   setKitVersion(join(root, 'kit'), version)
   return join(root, 'kit')
 }
+/**
+ * A private copy of the kit that is a real git checkout: committed, and — unless `tagged` is false — tagged as the
+ * release of its version. That is what `check` / `update` look at to tell a released kit from one with work on top.
+ */
+export function gitKit(version = '9.9.9', options: { tagged?: boolean } = {}): string {
+  const kit = cloneKit(version)
+  const repo = join(kit, '..')
+  git(repo, 'init', '-q')
+  git(repo, 'add', '-A')
+  git(repo, 'commit', '-q', '-m', `release v${version}`)
+  if (options.tagged !== false) git(repo, 'tag', `v${version}`)
+  return kit
+}
+export function git(repo: string, ...args: string[]): string {
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' }
+  const r = spawnSync('git', ['-C', repo, '-c', 'user.name=kit-test', '-c', 'user.email=kit-test@example.invalid', '-c', 'commit.gpgsign=false', ...args], { encoding: 'utf8', env })
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${r.stderr}`)
+  return r.stdout.trim()
+}
+
 export function setKitVersion(kit: string, version: string) {
   writeFileSync(join(kit, '..', 'package.json'), JSON.stringify({ name: 'kit-under-test', version }))
 }
