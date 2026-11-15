@@ -9,7 +9,8 @@ import { loadKit } from '../lib/kit.mjs'
 
 const USAGE = `usage:
   scaffold new <name> --kind nuxt-app|api|fullstack [--with a,b,c] [--db sqlite|mysql]
-           [--deploy cf-pages|container|pm2] [--port N] [--api-port N] --dir <target> [--context ctx.json] [--dry-run] [--json]
+           [--deploy cf-pages|container|pm2] [--port N] [--api-port N] [--no-sample] --dir <target>
+           [--context ctx.json] [--dry-run] [--json]
   scaffold add resource|page|job <name> [--dir <project>] [--json]
   scaffold check [<dir>] [--json]      exit 0 clean, 1 drift (names the kit version + commit it compared against)
   scaffold update [<dir>] [--json]     re-copy locked files + bump the layer tag; prints the by-hand notes of UPGRADING.md
@@ -39,6 +40,7 @@ function parse(argv) {
         dir: { type: 'string' },
         context: { type: 'string' },
         'dry-run': { type: 'boolean' },
+        'no-sample': { type: 'boolean' },
         json: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
       },
@@ -81,6 +83,7 @@ async function run(argv) {
         dir: flags.dir,
         context: readContext(flags.context),
         dryRun: !!flags['dry-run'],
+        sample: !flags['no-sample'],
       })
     case 'add':
       max(2)

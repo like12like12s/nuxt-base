@@ -22,7 +22,8 @@
       ],
       "files": [
         { "from": "files", "to": "" },
-        { "from": "variants/openapi.json", "to": "openapi.json" }
+        { "from": "variants/openapi.json", "to": "openapi.json", "when": { "sample": true } },
+        { "from": "variants/openapi.nosample.json", "to": "openapi.json", "when": { "sample": false } }
       ],
       "locked": [
         { "from": "runtime/auth/cli.ts", "to": "src/kit/auth/cli.ts" },
@@ -37,7 +38,8 @@
     "ui": {
       "files": [
         { "from": "files-ui", "to": "" },
-        { "from": "variants/schema.d.ts", "to": "app/api/schema.d.ts", "when": { "with": ["api"] } }
+        { "from": "variants/schema.d.ts", "to": "app/api/schema.d.ts", "when": { "with": ["api"], "sample": true } },
+        { "from": "variants/schema.nosample.d.ts", "to": "app/api/schema.d.ts", "when": { "with": ["api"], "sample": false } }
       ],
       "usage": "usage-ui.md"
     }

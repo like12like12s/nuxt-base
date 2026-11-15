@@ -16,6 +16,10 @@ function nextSequence(apiDir) {
 export default function generate({ name, dir, manifest, parts }) {
   const n = names(name)
   const auth = manifest.modules.includes('auth')
+  // The `editor` role belongs to the example resource: a project created with --no-sample only has `admin` until the
+  // app adds roles of its own (src/auth/roles.ts), so writes are admin-only there and the matrix has no editor column.
+  const editor = manifest.answers?.sample !== false
+  const writers = editor ? "requireRole('admin', 'editor')" : "requireRole('admin')"
   const seq = nextSequence(dir)
   const migration = `${seq}_${n.snake}`
   const base = `src/resources/${n.kebab}/${n.kebab}`
@@ -184,7 +188,7 @@ const createRoute_ = createRoute({
   path: '/${n.kebab}',
   tags,
   summary: 'Create a ${n.oneTitle.toLowerCase()}',
-${declare("requireRole('admin', 'editor')")}  request: { body: { required: true, content: json(${n.onePascal}CreateSchema) } },
+${declare(writers)}  request: { body: { required: true, content: json(${n.onePascal}CreateSchema) } },
   responses: { 201: { description: 'Created', content: json(dataOf(${n.onePascal}Schema)) }, ...errorResponses(${errors(400, 409, 'write')}) },
 })
 
@@ -193,7 +197,7 @@ const updateRoute = createRoute({
   path: '/${n.kebab}/{id}',
   tags,
   summary: 'Update a ${n.oneTitle.toLowerCase()}',
-${declare("requireRole('admin', 'editor')")}  request: { params: ${n.onePascal}IdParam, body: { required: true, content: json(${n.onePascal}UpdateSchema) } },
+${declare(writers)}  request: { params: ${n.onePascal}IdParam, body: { required: true, content: json(${n.onePascal}UpdateSchema) } },
   responses: { 200: { description: 'Updated', content: json(dataOf(${n.onePascal}Schema)) }, ...errorResponses(${errors(400, 404, 409, 'write')}) },
 })
 
@@ -345,7 +349,7 @@ describe('${n.kebab}', () => {
     { path: 'tests/helpers.ts', anchor: 'test-cleanup', insert: `await t.db.deleteFrom('${n.snake}').execute()` },
   ]
   if (auth) {
-    const row = (method, suffix, statuses) => `'${method} /api/v1/${n.kebab}${suffix}': { anonymous: 401, 'no role': ${statuses[0]}, editor: ${statuses[1]}, admin: ${statuses[2]} },`
+    const row = (method, suffix, statuses) => `'${method} /api/v1/${n.kebab}${suffix}': { anonymous: 401, 'no role': ${statuses[0]}, ${editor ? `editor: ${statuses[1]}, ` : ''}admin: ${statuses[2]} },`
     patches.push({
       path: 'tests/auth.spec.ts',
       anchor: 'auth-matrix',
@@ -451,7 +455,7 @@ test('${n.kebab}: the retry button of the error state loads the list again', asy
   const apiDir = parts.api?.dir ? `${parts.api.dir}` : '.'
   const next = [
     `${apiDir}: add the resource's fields — ${base}.schema.ts, the migration src/db/migrations/${migration}.ts, the table type in src/db/schema.ts and COLUMNS in ${base}.repo.ts`,
-    ...(auth ? [`${apiDir}: review the roles in ${base}.routes.ts (read = any signed-in caller, write = admin / editor, delete = admin) and keep the matrix in tests/auth.spec.ts in step`] : []),
+    ...(auth ? [`${apiDir}: review the roles in ${base}.routes.ts (read = any signed-in caller, write = ${editor ? 'admin / editor' : 'admin'}, delete = admin) and keep the matrix in tests/auth.spec.ts in step`] : []),
     `${apiDir}: npm run contract   # regenerates openapi.json — tests/contract.spec.ts is red until you do`,
     ...(hasUi ? [`${parts.ui.dir || '.'}: npm run client   # regenerates app/api/schema.d.ts — the new page does not typecheck until you do`] : []),
     `${apiDir}: npm run db:migrate -- up   # apply ${migration} to your development database`,

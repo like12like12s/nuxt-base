@@ -7,6 +7,16 @@ import { TRACE_ID, useApp } from './helpers.js'
 
 const t = useApp()
 let collector: OtlpCollector
+// A route of the app that every caller of these tests may GET.
+// @kit:if sample
+const ROUTE = '/api/v1/items'
+// @kit:else
+// @kit:if auth
+const ROUTE = '/api/v1/me'
+// @kit:else
+const ROUTE = '/version'
+// @kit:end
+// @kit:end
 
 beforeAll(async () => {
   collector = await startOtlpCollector()
@@ -17,12 +27,13 @@ afterAll(() => collector.close())
 describe('tracing', () => {
   it('off by default: no endpoint, no span, and the request still gets a trace id', async () => {
     expect(startTracing({ serviceName: 'test-api', env: {} })).toBe(false)
-    const res = await t.build().api.get('/api/v1/items')
+    const res = await t.build().api.get(ROUTE)
     expect(res.traceId).toMatch(TRACE_ID)
     await flushTracing()
     expect(collector.spans()).toEqual([])
   })
 
+  // @kit:if sample
   it('with an endpoint: the span, x-trace-id, the log line and the audit row share one trace id', async () => {
     expect(startTracing({ serviceName: 'test-api', env: { OTEL_EXPORTER_OTLP_ENDPOINT: collector.url } })).toBe(true)
     const { api, lines } = t.build()
@@ -36,13 +47,26 @@ describe('tracing', () => {
     const audit = await t.db.selectFrom('audit').select('traceId').where('action', '=', 'item.create').executeTakeFirstOrThrow()
     expect(audit.traceId).toBe(res.traceId)
   })
+  // @kit:else
+  it('with an endpoint: the span, x-trace-id and the log line share one trace id', async () => {
+    expect(startTracing({ serviceName: 'test-api', env: { OTEL_EXPORTER_OTLP_ENDPOINT: collector.url } })).toBe(true)
+    const { api, lines } = t.build()
+    const res = await api.get(ROUTE)
+    expect(res.status).toBe(200)
+    await flushTracing()
+
+    const span = collector.spans().find((s) => s.name === `GET ${ROUTE}`)
+    expect(span).toMatchObject({ traceId: res.traceId, service: 'test-api', kind: 2, attributes: { 'http.response.status_code': 200 } })
+    expect(lines.find((l) => l.msg === 'request')).toMatchObject({ traceId: res.traceId, path: ROUTE, status: 200 })
+  })
+  // @kit:end
 
   it('continues the trace of a trusted caller (TRUST_TRACEPARENT=1); anyone else starts a new trace', async () => {
     startTracing({ serviceName: 'test-api', env: { OTEL_EXPORTER_OTLP_ENDPOINT: collector.url } })
     const traceId = '4bf92f3577b34da6a3ce929d0e0e4736'
     const headers = { traceparent: `00-${traceId}-00f067aa0ba902b7-01` }
-    const res = await t.build({}, { TRUST_TRACEPARENT: '1' }).api.get('/api/v1/items', { headers })
-    const untrusted = await t.build().api.get('/api/v1/items', { headers })
+    const res = await t.build({}, { TRUST_TRACEPARENT: '1' }).api.get(ROUTE, { headers })
+    const untrusted = await t.build().api.get(ROUTE, { headers })
     await flushTracing()
     expect(res.traceId).toBe(traceId)
     expect(collector.spans().some((s) => s.traceId === traceId && s.parentSpanId === '00f067aa0ba902b7')).toBe(true)

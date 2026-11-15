@@ -9,6 +9,7 @@
 //            'tag'   = the UI extends the latest git tag from GitHub — required when the image is built by docker
 //   checks   extra async (t) => {} steps; `t` is the helper object documented in kit-gate.mjs
 //   db       with the db module: 'mysql' also runs the project's suite + built CLI on MySQL (kit-gate.mjs provides the server)
+//   sample   false = scaffold with --no-sample (no `items` example)
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
@@ -307,6 +308,82 @@ async function fullModules(t) {
   }
 }
 
+// A project created with --no-sample: nothing of the `items` example exists — not in the contract, not in the
+// database, not over HTTP — and the first resource is added with the generator, after which everything is green.
+async function noSample(t) {
+  const node = process.execPath
+  const cwd = t.apiDir
+  const p = t.port + 5
+  const base = `http://127.0.0.1:${p}`
+  const SECRET = 'gate-proxy-secret-0123456789'
+  const auth = t.plan.modules.includes('auth')
+  const prod = { PORT: String(p), HOST: '127.0.0.1', NODE_ENV: 'production', ...t.dbEnv, ...(auth ? { AUTH_PROXY_SECRET: SECRET, AUTH_ROLE_MAP: JSON.stringify({ 'app-admins': ['admin'] }) } : {}) }
+  const admin = auth ? { 'x-auth-proxy-secret': SECRET, 'x-authentik-username': 'alice', 'x-authentik-uid': 'uid-alice', 'x-authentik-groups': 'app-admins' } : {}
+  const cli = (args, opts = {}) => t.run(node, ['dist/db/cli.js', ...args], { cwd, timeout: 60_000, extraEnv: { ...t.dbEnv }, expect: opts.expect ?? 0 })
+  const call = async (path, init = {}) => {
+    const res = await fetch(base + path, { ...init, signal: AbortSignal.timeout(5000) })
+    const text = await res.text()
+    return { status: res.status, body: text ? JSON.parse(text) : null }
+  }
+  const serve = (probe) => t.withServer(node, ['dist/index.js'], { cwd, extraEnv: prod }, async () => { await t.waitFor(`${base}/health/live`); await probe() })
+
+  t.begin('no-sample: the project says so, and has no file of the example')
+  if (t.plan.sample !== false) t.fail(`new --json reported sample: ${t.plan.sample}`)
+  const leftovers = t.plan.files.filter((file) => /items/.test(file))
+  if (leftovers.length) t.fail(`files of the example were generated: ${leftovers.join(', ')}`)
+  if (auth && !/ROLES = \['admin'\] as const/.test(readFileSync(join(cwd, 'src/auth/roles.ts'), 'utf8'))) t.fail('roles.ts still has the example role')
+
+  await contractCheck(t)
+  if (t.uiDir) await typedClient(t)
+
+  t.begin('no-sample: migrate up ends at 0001_base, seed is a no-op that succeeds twice')
+  const up = await cli(['migrate', 'up'])
+  if (!/schema ok \(0001_base\)/.test(up.out)) t.fail('migrate up did not end with "schema ok (0001_base)"')
+  await cli(['seed'])
+  await cli(['seed'])
+
+  t.begin('no-sample: over HTTP there is no /api/v1/items and the contract does not document it')
+  await serve(async () => {
+    const ready = await call('/health/ready')
+    if (ready.status !== 200) t.fail(`/health/ready: ${ready.status} ${JSON.stringify(ready.body)}`)
+    for (const headers of [{}, admin]) {
+      const res = await call('/api/v1/items', { headers })
+      if (res.status !== 404 || res.body.error.code !== 'NOT_FOUND') t.fail(`/api/v1/items answered ${res.status} ${JSON.stringify(res.body)}`)
+    }
+    const doc = await call('/openapi.json')
+    const resources = Object.keys(doc.body.paths).filter((path) => path.startsWith('/api/v1/') && path !== '/api/v1/me')
+    if (resources.length) t.fail(`the contract documents resources: ${resources.join(', ')}`)
+    if (auth) {
+      const me = await call('/api/v1/me', { headers: admin })
+      if (me.status !== 200 || me.body.data.roles.join() !== 'admin') t.fail(`/me through the proxy: ${me.status} ${JSON.stringify(me.body)}`)
+    }
+  })
+
+  t.begin('no-sample: scaffold add resource orders -> contract (+ client) -> gate + build green')
+  const added = JSON.parse((await t.scaffold(['add', 'resource', 'orders', '--dir', t.dir, '--json'])).out)
+  if (!added.files.some((file) => file.endsWith('src/db/migrations/0002_orders.ts'))) t.fail(`the first resource is not migration 0002: ${added.files.join(', ')}`)
+  await t.run('npm', ['run', 'contract'], { cwd, timeout: 60_000 })
+  if (t.uiDir) await t.run('npm', ['run', 'client'], { cwd: t.uiDir, timeout: 120_000 })
+  await t.run('npm', ['run', 'gate'], { timeout: 600_000 })
+  await t.run('npm', ['run', 'build'], { timeout: 600_000 })
+  await t.scaffold(['check', t.dir, '--json'])
+
+  t.begin('no-sample: the first resource works on the built app (admin writes; without auth anyone)')
+  const migrated = await cli(['migrate', 'up'])
+  if (!/schema ok \(0002_orders\)/.test(migrated.out)) t.fail('migrate up did not end with "schema ok (0002_orders)"')
+  await serve(async () => {
+    if (auth && (await call('/api/v1/orders')).status !== 401) t.fail('the generated resource is reachable without auth')
+    const made = await call('/api/v1/orders', { method: 'POST', headers: { 'content-type': 'application/json', ...admin }, body: JSON.stringify({ name: 'Order 1' }) })
+    const list = await call('/api/v1/orders', { headers: admin })
+    if (made.status !== 201 || list.status !== 200 || list.body.meta.total !== 1) t.fail(`generated resource: create ${made.status}, list ${list.status} ${JSON.stringify(list.body)}`)
+  })
+
+  if (t.uiDir && !t.noE2e) {
+    t.begin('no-sample: the UI e2e suite (with the generated pages) on the rebuilt app')
+    await t.run('npx', ['playwright', 'test'], { cwd: t.uiDir, timeout: 300_000, extraEnv: { E2E_PORT: String(t.port + 2) } })
+  }
+}
+
 export const combos = [
   { id: 'nuxt-app', kind: 'nuxt-app', e2e: true },
   { id: 'nuxt-app+cf-pages', kind: 'nuxt-app', deploy: 'cf-pages' },
@@ -328,6 +405,9 @@ export const combos = [
   // task E: every module, then the playbook generators on the generated project
   { id: 'fullstack+full', kind: 'fullstack', with: ['db', 'auth', 'api', 'trace', 'og', 'security', 'jobs', 'notify'], e2e: true, checks: [fullModules] },
   { id: 'api+full+container', kind: 'api', with: ['auth', 'trace', 'security', 'jobs', 'notify'], db: 'sqlite', deploy: 'container', checks: [fullModules] },
+  // --no-sample: no `items` example anywhere; the first resource comes from the generator
+  { id: 'fullstack+auth+no-sample', kind: 'fullstack', with: ['db', 'auth', 'api', 'og'], sample: false, e2e: true, checks: [noSample] },
+  { id: 'api+no-sample', kind: 'api', with: ['api', 'db'], sample: false, checks: [noSample] },
   // link previews on Cloudflare Pages: the e2e suite runs against wrangler's local Pages runtime, with crawler user agents
   { id: 'nuxt-app+og+auth+cf-pages', kind: 'nuxt-app', with: ['og', 'auth'], deploy: 'cf-pages', e2e: true },
 ]

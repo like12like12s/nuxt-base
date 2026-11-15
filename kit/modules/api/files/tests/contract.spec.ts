@@ -21,7 +21,11 @@ describe('openapi contract', () => {
   it('documents every v1 route with the standard envelopes and the error shape', () => {
     const doc = JSON.parse(buildContract())
     expect(doc.openapi).toBe('3.1.0')
+    // @kit:if sample
     expect(Object.keys(doc.paths)).toEqual(expect.arrayContaining(['/api/v1/items', '/api/v1/items/{id}', '/health/live', '/health/ready', '/version']))
+    // @kit:else
+    expect(Object.keys(doc.paths)).toEqual(expect.arrayContaining(['/health/live', '/health/ready', '/version']))
+    // @kit:end
     // every resource lives under /api/v1 — nothing but the system routes sits outside it
     expect(Object.keys(doc.paths).filter((path) => !path.startsWith('/api/v1/')).sort()).toEqual(['/health/live', '/health/ready', '/version'])
     for (const [path, operations] of Object.entries<Record<string, any>>(doc.paths)) {
@@ -33,6 +37,8 @@ describe('openapi contract', () => {
       }
     }
     expect(doc.components.schemas.Error.properties.error.required.sort()).toEqual(['code', 'message', 'traceId'])
+    // @kit:if sample
     expect(doc.paths['/api/v1/items'].get.parameters.map((p: { name: string }) => p.name).sort()).toEqual(['ids', 'limit', 'offset', 'sort'])
+    // @kit:end
   })
 })

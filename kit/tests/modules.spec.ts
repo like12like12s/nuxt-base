@@ -111,7 +111,7 @@ describe('kind api --with api,db', () => {
 
   it('--json reports what a backup job must cover, and registers nothing itself', () => {
     expect(r.json.backup).toEqual([{ id: 'demo-app-db', service: 'demo-app-api', engine: 'sqlite', envKey: 'DATABASE_URL', path: 'data/demo-app.db' }])
-    expect(Object.keys(r.json)).toEqual(['ok', 'dir', 'name', 'title', 'description', 'kind', 'modules', 'db', 'deploy', 'kitVersion', 'files', 'locked', 'services', 'env', 'backup', 'next'])
+    expect(Object.keys(r.json)).toEqual(['ok', 'dir', 'name', 'title', 'description', 'kind', 'modules', 'db', 'deploy', 'sample', 'kitVersion', 'files', 'locked', 'services', 'env', 'backup', 'next'])
     expect(r.json.next.join('\n')).toMatch(/db:migrate -- up/)
   })
 
@@ -124,6 +124,88 @@ describe('kind api --with api,db', () => {
   it('usage.md documents the standard, the database commands and the test kit', () => {
     const usage = read(dir, '.memory/docs/guides/usage.md')
     for (const text of ['## API standard', 'GET /health/ready', '## Database', 'npm run db:migrate -- up', 'DB_BACKUP_CMD', '## Test kit', 'TEST_MYSQL_URL']) expect(usage, text).toContain(text)
+  })
+})
+
+// Finding #13 of the first real use: the example resource `items` (table, routes, tests, seed rows, the `editor`
+// role) stayed in a real app and there was no way to leave it out.
+describe('--no-sample', () => {
+  const FULL = ['--kind', 'fullstack', '--with', 'db,auth,api,trace,og,security,jobs,notify', '--deploy', 'container']
+  const texts = (dir: string, files: string[]) => files.filter((f) => !f.endsWith('package-lock.json')).map((f) => [f, read(dir, f)] as const)
+
+  it.each([[['--kind', 'api', '--with', 'api,db']], [['--kind', 'fullstack', '--with', 'api,db']], [FULL]])('%j: nothing of the example is generated — no file, no table, no route, no test, no mention', (args) => {
+    const sample = scaffold(args)
+    const { dir, r } = scaffold([...args, '--no-sample'])
+    expect(r.status, r.stdout).toBe(0)
+    expect(r.json.sample).toBe(false)
+    expect(sample.r.json.sample).toBe(true)
+    expect(JSON.parse(read(dir, '.scaffold.json')).answers.sample).toBe(false)
+    expect(JSON.parse(read(sample.dir, '.scaffold.json')).answers).not.toHaveProperty('sample') // existing manifests stay as they are
+
+    const gone = sample.r.json.files.filter((f: string) => !r.json.files.includes(f)).map((f: string) => f.replace(/^api\//, ''))
+    expect(gone.sort()).toEqual(['src/db/migrations/0002_items.ts', 'src/resources/items/items.repo.ts', 'src/resources/items/items.routes.ts', 'src/resources/items/items.schema.ts', 'tests/items.spec.ts'])
+    expect(r.json.files.filter((f: string) => !sample.r.json.files.includes(f))).toEqual([])
+
+    // the word only survives where it is an example in prose or a stubbed path of the test kit — never as code that needs the resource
+    for (const [file, text] of texts(dir, r.json.files)) {
+      expect(text, file).not.toMatch(/@kit:/)
+      // (openapi.json / schema.d.ts use `items` as the JSON-schema keyword of an array — their paths are checked below)
+      if (/\.(md)$/.test(file) || /tests\/e2e\/api\.spec\.ts$/.test(file) || /server\/og\.ts$/.test(file) || /kit\//.test(file) || /openapi\.json$|schema\.d\.ts$/.test(file)) continue
+      expect(text, file).not.toMatch(/\bitems?\b|Items|SEED_ITEMS|registerItems/)
+    }
+    const api = args.includes('fullstack') ? 'api/' : ''
+    expect(read(dir, `${api}src/db/migrations/index.ts`)).toMatch(/'0001_base': baseMigration,\n {2}\/\/ kit:anchor migrations/)
+    expect(read(dir, `${api}src/db/schema.ts`)).toMatch(/export interface Schema extends BaseTables \{\n {2}\/\/ kit:anchor schema/)
+    expect(Object.keys(JSON.parse(read(dir, `${api}openapi.json`)).paths).filter((p) => p.includes('items'))).toEqual([])
+    // every anchor the resource generator needs is still there
+    for (const [file, anchor] of [['src/app.ts', 'resource-imports'], ['src/app.ts', 'resources'], ['src/db/migrations/index.ts', 'migration-imports'], ['src/db/migrations/index.ts', 'migrations'], ['src/db/schema.ts', 'tables'], ['src/db/schema.ts', 'schema'], ['tests/helpers.ts', 'test-cleanup']]) {
+      expect(read(dir, api + file), file).toContain(`kit:anchor ${anchor}`)
+    }
+  })
+
+  it('with auth: the only role is admin — no `editor` in the roles, the test matrix or the role map example', () => {
+    const { dir } = scaffold([...FULL, '--no-sample'])
+    expect(read(dir, 'api/src/auth/roles.ts')).toContain("export const ROLES = ['admin'] as const")
+    const spec = read(dir, 'api/tests/auth.spec.ts')
+    expect(spec).toContain("type Caller = 'anonymous' | 'no role' | 'admin'")
+    expect(spec).toContain("'GET /api/v1/me': { anonymous: 401, 'no role': 200, admin: 200 },\n  // kit:anchor auth-matrix")
+    expect(spec).not.toMatch(/app-editors|editor:/)
+    expect(read(scaffold(FULL).dir, 'api/src/auth/roles.ts')).toContain("export const ROLES = ['admin', 'editor'] as const")
+  })
+
+  it('add resource in such a project: starts at 0002, writes are admin-only, and the matrix rows have its columns', () => {
+    const { dir } = scaffold([...FULL, '--no-sample'])
+    const r = cli(['add', 'resource', 'orders', '--dir', dir, '--json'])
+    expect(r.status, r.stdout).toBe(0)
+    expect(r.json.files).toContain('api/src/db/migrations/0002_orders.ts')
+    const routes = read(dir, 'api/src/resources/orders/orders.routes.ts')
+    expect(routes.match(/requireRole\('admin'\)/g)).toHaveLength(3)
+    expect(routes).not.toContain('editor')
+    expect(read(dir, 'api/tests/auth.spec.ts')).toContain("'POST /api/v1/orders': { anonymous: 401, 'no role': 403, admin: 400 },")
+    expect(r.json.next.join('\n')).toContain('write = admin, delete = admin')
+    // and the default project is unchanged
+    const sample = scaffold(FULL).dir
+    cli(['add', 'resource', 'orders', '--dir', sample, '--json'])
+    expect(read(sample, 'api/src/resources/orders/orders.routes.ts')).toContain("requireRole('admin', 'editor')")
+    expect(read(sample, 'api/tests/auth.spec.ts')).toContain("'POST /api/v1/orders': { anonymous: 401, 'no role': 403, editor: 400, admin: 400 },")
+  })
+
+  it('survives check / update (it is a recorded answer), and is a no-op without the api module', () => {
+    const { dir } = scaffold(['--kind', 'fullstack', '--with', 'api,db', '--no-sample'])
+    expect(cli(['check', dir, '--json']).json).toMatchObject({ clean: true, drift: [] })
+    expect(cli(['update', dir, '--json']).json.updated).toEqual([])
+    const plain = scaffold(['--kind', 'nuxt-app', '--no-sample'])
+    expect(plain.r.status).toBe(0)
+    expect(plain.r.json.sample).toBe(false)
+    expect(JSON.parse(read(plain.dir, '.scaffold.json')).answers).not.toHaveProperty('sample')
+    expect(snapshot(plain.dir)).toEqual(snapshot(scaffold(['--kind', 'nuxt-app']).dir))
+  })
+
+  it('the default is byte-identical to before: the sample files come from their own directory, same paths', () => {
+    const { dir, r } = scaffold(['--kind', 'api', '--with', 'api,db'])
+    for (const f of ['src/resources/items/items.routes.ts', 'src/db/migrations/0002_items.ts', 'tests/items.spec.ts']) expect(r.json.files).toContain(f)
+    expect(read(dir, 'src/app.ts')).toContain("import { registerItems } from './resources/items/items.routes.js'\n")
+    expect(read(dir, 'src/db/migrations/index.ts')).toContain("  '0001_base': baseMigration,\n  '0002_items': items,\n  // kit:anchor migrations")
   })
 })
 

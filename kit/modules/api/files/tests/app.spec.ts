@@ -69,6 +69,7 @@ describe('error shape — { error: { code, message, details?, traceId } } on eve
     expect(res.body.error.traceId).toBe(res.traceId)
   }
 
+  // @kit:if sample
   it('400 VALIDATION with details that name the field', async () => {
     const res = await t.build().api.post('/api/v1/items', { name: '', quantity: -1 })
     expectError(res, 400, 'VALIDATION')
@@ -80,6 +81,7 @@ describe('error shape — { error: { code, message, details?, traceId } } on eve
     expectError(res, 400, 'VALIDATION')
   })
 
+  // @kit:end
   it('401 UNAUTHORIZED and 403 FORBIDDEN', async () => {
     const { app, api } = t.build()
     // @kit:if auth
@@ -94,6 +96,7 @@ describe('error shape — { error: { code, message, details?, traceId } } on eve
     expectError(await api.get('/_test/403'), 403, 'FORBIDDEN')
   })
 
+  // @kit:if sample
   it('404 NOT_FOUND for an unknown route and for a missing resource', async () => {
     const { api } = t.build()
     expectError(await api.get('/nope'), 404, 'NOT_FOUND')
@@ -105,6 +108,14 @@ describe('error shape — { error: { code, message, details?, traceId } } on eve
     await api.post('/api/v1/items', { name: 'Widget' })
     expectError(await api.post('/api/v1/items', { name: 'Widget' }), 409, 'CONFLICT')
   })
+  // @kit:else
+  // (400 with details, 404 for a missing record and 409 are in the test of each resource — `scaffold add resource`)
+  it('404 NOT_FOUND for an unknown route', async () => {
+    const { api } = t.build()
+    expectError(await api.get('/nope'), 404, 'NOT_FOUND')
+    expectError(await api.get('/api/v1/nope'), 404, 'NOT_FOUND')
+  })
+  // @kit:end
 
   it('500 INTERNAL never leaks the cause: no message, no stack, no SQL — the log has it, under the same trace id', async () => {
     const { app, api, lines } = t.build()
@@ -123,6 +134,7 @@ describe('error shape — { error: { code, message, details?, traceId } } on eve
     expect(String(logged?.error)).toContain('hunter2')
   })
 
+  // @kit:if sample
   it('a failing query surfaces as 500 without the SQL', async () => {
     const { api } = t.build()
     await t.db.schema.alterTable('items').renameTo('items_gone').execute()
@@ -134,4 +146,5 @@ describe('error shape — { error: { code, message, details?, traceId } } on eve
       await t.db.schema.alterTable('items_gone').renameTo('items').execute()
     }
   })
+  // @kit:end
 })

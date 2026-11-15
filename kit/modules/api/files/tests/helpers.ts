@@ -19,7 +19,9 @@ export function useApp() {
   const t = useTestDb<Schema>({ migrations })
   useDeterministic()
   beforeEach(async () => {
+    // @kit:if sample
     await t.db.deleteFrom('items').execute()
+    // @kit:end
     // kit:anchor test-cleanup — `scaffold add resource` empties its table above this line
     await t.db.deleteFrom('audit').execute()
     // @kit:if auth

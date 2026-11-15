@@ -58,6 +58,8 @@ export function cmdNew(kit, opts) {
       modules: plan.modules,
       db: plan.db,
       deploy: plan.deploy,
+      // true = the example resource `items` is part of the project (the api module without --no-sample)
+      sample: plan.sample,
       kitVersion: plan.kitVersion,
       files: [...plan.files.map((f) => f.path), ...plan.symlinks.map((s) => s.path)],
       locked: Object.keys(plan.locked),

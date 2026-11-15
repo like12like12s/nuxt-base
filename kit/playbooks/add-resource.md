@@ -4,7 +4,7 @@ description: Playbook — add an API resource (table, schemas, routes, tests, co
 ---
 # Playbook: add a resource
 
-One command, then fill in. Do not copy `items` by hand.
+One command, then fill in. Do not copy another resource by hand.
 
 ```bash
 scaffold add resource <name>        # plural kebab-case: orders, order-lines   (from the project root)

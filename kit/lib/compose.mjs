@@ -138,13 +138,14 @@ function resolvePorts(kind, port, apiPort) {
 
 // `when` on a file / locked / symlink / backup entry: every key present must hold.
 //   kind: [..] the project's kind is one of these · with: [..] all these modules are in · without: [..] none of them is
-//   db: [..] the --db value is one of these
+//   db: [..] the --db value is one of these · sample: true|false the example resource is / is not part of the project
 const matches = (when, ctx) =>
   !when ||
   ((!when.kind || when.kind.includes(ctx.kind)) &&
     (!when.with || when.with.every((m) => ctx.modules.includes(m))) &&
     (!when.without || !when.without.some((m) => ctx.modules.includes(m))) &&
-    (!when.db || when.db.includes(ctx.db)))
+    (!when.db || when.db.includes(ctx.db)) &&
+    (when.sample === undefined || when.sample === ctx.sample))
 
 // What `new` was asked for -> validated, normalised selection. Throws KitError with the contract's exit codes.
 export function resolveSelection(kit, input) {
@@ -168,6 +169,10 @@ export function resolveSelection(kit, input) {
     if (!preset.kinds.includes(kind.name)) throw incompatible('incompatible_preset', `deploy preset "${preset.name}" does not support kind "${kind.name}" (supports: ${preset.kinds.join(', ')})`)
   }
 
+  // The example resource `items` (table, routes, tests, seed rows, the `editor` role) comes with the api module unless
+  // the project is created with --no-sample. Without the api module there is no sample to leave out.
+  const sample = modules.includes('api') && input.sample !== false
+
   const { context, warnings } = validateContext(input.context ?? {}, input.lenient === true)
   const hasUi = kind.parts.some((p) => p.type === 'ui')
   const ports = resolvePorts(kind, input.port, input.apiPort)
@@ -181,6 +186,7 @@ export function resolveSelection(kit, input) {
     db,
     preset,
     ports,
+    sample,
     warnings,
     layerRef: hasUi ? context.layerRef || kit.layerRef : null,
     // Everything needed to re-compose this exact project later (check / update read it back from .scaffold.json).
@@ -192,6 +198,7 @@ export function resolveSelection(kit, input) {
       apiPort: ports.api,
       deploy: deployCtx,
       // Only recorded when given, so projects without it keep the same .scaffold.json.
+      ...(modules.includes('api') && !sample ? { sample: false } : {}),
       ...(context.mysqlHost ? { mysqlHost: String(context.mysqlHost) } : {}),
       ...(context.otlpEndpoint ? { otlpEndpoint: String(context.otlpEndpoint) } : {}),
       ...(context.authentikUrl ? { authentikUrl: String(context.authentikUrl) } : {}),
@@ -224,9 +231,9 @@ export function compose(kit, input) {
   for (const name of sel.modules) applications.push({ unit: kit.modules.get(name) })
   if (preset) applications.push({ unit: preset })
 
-  const when = { kind: kind.name, modules: sel.modules, db: sel.db }
+  const when = { kind: kind.name, modules: sel.modules, db: sel.db, sample: sel.sample }
   // What `@kit:if` blocks in templates can ask (lib/render.mjs).
-  const flags = new Set([...sel.modules, `kind:${kind.name}`, ...(sel.db ? [`db:${sel.db}`] : []), ...(preset ? [`deploy:${preset.name}`] : [])])
+  const flags = new Set([...sel.modules, `kind:${kind.name}`, ...(sel.db ? [`db:${sel.db}`] : []), ...(preset ? [`deploy:${preset.name}`] : []), ...(sel.sample ? ['sample'] : [])])
   for (const { unit, only } of applications) {
     if (!unit) throw new Error(`kit is inconsistent: a unit referenced by kind "${kind.name}" is missing`)
     for (const [target, c] of Object.entries(unit.contributes ?? {})) {
@@ -390,6 +397,7 @@ export function compose(kit, input) {
     modules: sel.modules,
     db: sel.db,
     deploy: preset?.name ?? null,
+    sample: sel.sample,
     kitVersion: kit.version,
     layerRef: sel.layerRef,
     parts,
@@ -419,6 +427,7 @@ export function composeFromManifest(kit, manifest) {
     deploy: manifest.deploy ?? undefined,
     port: a.port,
     apiPort: both ? a.apiPort : undefined,
+    sample: a.sample !== false,
     context: { title: a.title, description: a.description, layerRef: manifest.layerRef ?? undefined, deploy: a.deploy, mysqlHost: a.mysqlHost, otlpEndpoint: a.otlpEndpoint, authentikUrl: a.authentikUrl },
   })
 }

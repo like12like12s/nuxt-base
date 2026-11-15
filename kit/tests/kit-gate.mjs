@@ -218,6 +218,7 @@ async function gateCombo(combo, index) {
     if (combo.with?.length) args.push('--with', combo.with.join(','))
     if (combo.db) args.push('--db', combo.db)
     if (combo.deploy) args.push('--deploy', combo.deploy)
+    if (combo.sample === false) args.push('--no-sample')
     begin('scaffold')
     const plan = JSON.parse((await scaffold(log, args)).out)
     const api = plan.services.find((s) => s.type === 'api')

@@ -5,7 +5,11 @@ import { dirname, join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { migrations } from '../src/db/migrations/index.js'
 import type { Schema } from '../src/db/schema.js'
+// @kit:if sample
 import { SEED_ITEMS, seed } from '../src/db/seed.js'
+// @kit:else
+import { seed } from '../src/db/seed.js'
+// @kit:end
 import { runDbCli } from '../src/kit/db/cli.js'
 import { appliedMigrations, migrateDown, migrateReset, migrateUp, schemaState } from '../src/kit/db/migrate.js'
 import { createTestDb, mysqlSkipNotice, testDialect, useTestDb } from '../src/kit/testing/test-db.js'
@@ -31,7 +35,9 @@ describe(`migrations (${testDialect()})`, () => {
 
     expect((await migrateUp(t.db, migrations)).map((r) => [r.migrationName, r.direction, r.status])).toEqual(names.map((n) => [n, 'Up', 'Success']))
     expect(await schemaState(t.db, migrations)).toMatchObject({ state: 'ok', pending: [], current: names.at(-1) })
+    // @kit:if sample
     await t.db.insertInto('items').values({ id: 'a', name: 'kept until down', description: null, quantity: 1, createdAt: 'x', updatedAt: 'x', deletedAt: null }).execute()
+    // @kit:end
 
     // one step down reverts only the newest
     expect((await migrateDown(t.db, migrations)).map((r) => r.migrationName)).toEqual([names.at(-1)])
@@ -40,12 +46,20 @@ describe(`migrations (${testDialect()})`, () => {
     await migrateReset(t.db, migrations)
     expect(await appliedMigrations(t.db)).toEqual([])
     const tables = (await t.db.introspection.getTables()).map((table) => table.name)
+    // @kit:if sample
     for (const table of ['users', 'audit', 'service_tokens', 'items']) expect(tables).not.toContain(table)
+    // @kit:else
+    for (const table of ['users', 'audit', 'service_tokens']) expect(tables).not.toContain(table)
+    // @kit:end
 
     // and up again, into a working schema
     expect((await migrateUp(t.db, migrations)).every((r) => r.status === 'Success')).toBe(true)
     expect((await schemaState(t.db, migrations)).state).toBe('ok')
+    // @kit:if sample
     expect(await t.db.selectFrom('items').selectAll().execute()).toEqual([])
+    // @kit:else
+    expect(await t.db.selectFrom('users').selectAll().execute()).toEqual([])
+    // @kit:end
     expect(await migrateUp(t.db, migrations)).toEqual([]) // nothing left to do
   })
 })
@@ -71,6 +85,7 @@ describe('base tables', () => {
 describe('seed', () => {
   const t = useTestDb<Schema>({ migrations, label: 'seed' })
 
+  // @kit:if sample
   it('is idempotent: running it twice leaves exactly the same rows', async () => {
     await seed(t.database)
     const first = await t.db.selectFrom('items').selectAll().orderBy('id').execute()
@@ -78,6 +93,15 @@ describe('seed', () => {
     await seed(t.database)
     expect(await t.db.selectFrom('items').selectAll().orderBy('id').execute()).toEqual(first)
   })
+  // @kit:else
+  // Compare the tables your seed fills: once it inserts rows, select them here before and after the second run.
+  it('is idempotent: running it twice does not fail and leaves the base tables as they were', async () => {
+    await seed(t.database)
+    const first = await t.db.selectFrom('users').selectAll().orderBy('id').execute()
+    await seed(t.database)
+    expect(await t.db.selectFrom('users').selectAll().orderBy('id').execute()).toEqual(first)
+  })
+  // @kit:end
 })
 
 describe('/health/ready follows the database', () => {
@@ -121,7 +145,9 @@ describe('db commands', () => {
     expect(await run('check')).toBe(0)
     expect(await run('seed')).toBe(0)
     expect(await run('seed')).toBe(0)
+    // @kit:if sample
     expect(await database.db.selectFrom('items').select('id').execute()).toHaveLength(SEED_ITEMS.length)
+    // @kit:end
 
     // one migration back, then up again: this time there is data to protect
     expect(await run('migrate', 'down')).toBe(0)

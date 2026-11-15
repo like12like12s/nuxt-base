@@ -22,7 +22,9 @@ import { parseOrigins, security } from './kit/security/security.js'
 // @kit:if trace
 import { traceMiddleware } from './kit/trace/tracing.js'
 // @kit:end
+// @kit:if sample
 import { registerItems } from './resources/items/items.routes.js'
+// @kit:end
 // @kit:if auth
 import { registerMe } from './resources/me/me.routes.js'
 // @kit:end
@@ -97,9 +99,14 @@ export function createApp(config: Config, deps: AppDeps) {
   // @kit:end
   // Resources of the app. One register<Resource>() per resource, all under /api/v1.
   mountV1(api, (v1) => {
+    // @kit:if sample
     registerItems(v1, { db: deps.database.db })
+    // @kit:end
     // @kit:if auth
     registerMe(v1)
+    // @kit:end
+    // @kit:if !sample !auth
+    void v1 // no resource yet — delete this line once `scaffold add resource` has registered the first one
     // @kit:end
     // kit:anchor resources — `scaffold add resource` registers it above this line
   })

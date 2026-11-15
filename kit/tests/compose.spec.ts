@@ -47,7 +47,7 @@ describe('new — composition', () => {
 
   it('--json for `new` has exactly the contract keys', () => {
     const { r } = scaffold(['--kind', 'api', '--port', '3920'])
-    expect(Object.keys(r.json)).toEqual(['ok', 'dir', 'name', 'title', 'description', 'kind', 'modules', 'db', 'deploy', 'kitVersion', 'files', 'locked', 'services', 'env', 'backup', 'next'])
+    expect(Object.keys(r.json)).toEqual(['ok', 'dir', 'name', 'title', 'description', 'kind', 'modules', 'db', 'deploy', 'sample', 'kitVersion', 'files', 'locked', 'services', 'env', 'backup', 'next'])
     expect(r.json).toMatchObject({ ok: true, name: 'demo-app', kind: 'api', modules: ['base'], db: null, deploy: null, kitVersion: rootPkg.version, backup: [] })
     expect(r.json.services).toEqual([{ id: 'demo-app-api', name: 'API', type: 'api', port: 3920, healthPath: '/health/live' }])
     expect(r.json.env).toContainEqual({ key: 'PORT', required: true, secret: false })

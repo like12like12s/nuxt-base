@@ -13,7 +13,8 @@ everything around it: preflight, install, gate, git, registration.
 
 ```
 node <KIT>/bin/scaffold.mjs new <name> --kind nuxt-app|api|fullstack [--with a,b,c] [--db sqlite|mysql]
-     [--deploy cf-pages|container|pm2] [--port N] [--api-port N] --dir <target> [--context ctx.json] [--dry-run] [--json]
+     [--deploy cf-pages|container|pm2] [--port N] [--api-port N] [--no-sample] --dir <target>
+     [--context ctx.json] [--dry-run] [--json]
 node <KIT>/bin/scaffold.mjs add resource|page|job <name> [--dir <project>] [--json]
 node <KIT>/bin/scaffold.mjs check [<dir>] [--json]     exit 0 clean · 1 drift
 node <KIT>/bin/scaffold.mjs update [<dir>] [--json]    re-copy locked files + bump the layer tag
@@ -38,7 +39,7 @@ With `--json` the result is one JSON document on stdout. Errors: `{ "ok": false,
 the exit code (without `--json`: the message on stderr).
 
 ```
-new     { ok, dir, name, title, description, kind, modules[], db, deploy, kitVersion, files[], locked[],
+new     { ok, dir, name, title, description, kind, modules[], db, deploy, sample, kitVersion, files[], locked[],
           services[{ id, name, type: "web"|"api", port, healthPath, internal? }], env[{ key, required, secret }],
           backup[{ id, service, engine: "sqlite"|"mysql", envKey, path? | database? }], next[] }
           (+ "dryRun": true with --dry-run — same plan, nothing written)
@@ -61,6 +62,12 @@ list    { ok, kitVersion, layerRef, kinds[{ name, description, parts[{ type, dir
   the name. Without a `title` in `--context` (absent, blank, or just the name again) it is derived from the name
   (`kit-ref` -> `Kit Ref`); without a `description`, `<Title> — scaffolded with the nuxt-base kit`. No generated
   document has an empty bullet or heading, whatever was passed.
+- `--no-sample` leaves the example resource out: no `src/resources/items/`, no `0002_items` migration, no seed rows,
+  no `items` tests, no `editor` role (the app starts with `admin` only), and a contract / typed client without it.
+  `sample` in the result says which it is (`true` with the `api` module unless the flag was given; `false`
+  otherwise). It is recorded as `answers.sample: false` — only then, so existing manifests are unchanged — and
+  `add resource` follows it (writes are admin-only, matrix rows without the editor column). The first resource of
+  such a project is `scaffold add resource <name>`.
 - `services[].internal: true` (only present when true): the API of a `fullstack` project deployed with the
   `container` preset. The compose file publishes no host port for it — the UI reaches it over the compose network —
   so `port` is its development port only: do not register a health probe or a route against it on the deploy host.
@@ -83,7 +90,7 @@ list    { ok, kitVersion, layerRef, kinds[{ name, description, parts[{ type, dir
   off); `authentikUrl` is named in the operator instructions of the `auth` module. Keys a module does not use are
   ignored.
 - `.scaffold.json` (in every generated project):
-  `{ "kit", "kind", "modules", "db", "deploy", "layerRef", "answers": { name, title, description, port, apiPort, deploy, mysqlHost?, otlpEndpoint?, authentikUrl? }, "locked": { "<path>": "sha256:<hex>" } }`.
+  `{ "kit", "kind", "modules", "db", "deploy", "layerRef", "answers": { name, title, description, port, apiPort, deploy, sample?, mysqlHost?, otlpEndpoint?, authentikUrl? }, "locked": { "<path>": "sha256:<hex>" } }`.
   `answers` is everything needed to re-compose the project, which is how `check` / `update` / `add` work.
   A locked hash carries its algorithm prefix on purpose: a bare 64-character hex value beside a key such as
   `…/tokens.ts` is what secret scanners report as a generic API key, and a fresh project must pass a default
@@ -200,13 +207,14 @@ Rules that keep the output deterministic — **same inputs, byte-identical outpu
 - No clock, no randomness, no environment lookups in a template or in `lib/compose.mjs`.
 - Conditional blocks: a line that is only a comment `@kit:if <terms>` / `@kit:else` / `@kit:end` (`//`, `#` or
   `<!-- -->` style) keeps or drops the lines in between; the directive lines never reach the project. Terms (all must
-  hold): a module name, `kind:<kind>`, `db:<db>`, `deploy:<preset>`, each optionally negated with `!`. Blocks nest.
+  hold): a module name, `kind:<kind>`, `db:<db>`, `deploy:<preset>`, `sample`, each optionally negated with `!`. Blocks nest.
   This is how ONE app-owned file (`src/app.ts`, `src/config.ts`, a test helper) serves every module combination —
   prefer it to a `when` variant whenever the file is text with comments. JSON files cannot hold a directive: they use
   `when` variants (`modules/api/variants/openapi.json` without auth, `modules/auth/variants/openapi.json` with it).
 - Two units writing the same path is an error, not a merge. Variants use `when` on a `files` / `locked` / `symlinks` /
   `backup` entry — every key given must hold: `kind: [..]` (the project's kind is one of), `with: [..]` (all of these
-  modules are selected), `without: [..]` (none of them is), `db: [..]` (the `--db` value is one of). That is how a
+  modules are selected), `without: [..]` (none of them is), `db: [..]` (the `--db` value is one of), `sample:
+  true|false` (the example resource is / is not part of the project — its files live in `files-sample/`). That is how a
   module replaces a file of the kind: the kind ships it `without` the module, the module ships its own.
 - A path segment `dot.x` in a `files/` tree becomes `.x` in the project (a real `.gitignore` inside the kit would act
   on this repo). `.gitignore` itself is assembled from the `gitignore` lines and is always written first.
@@ -305,7 +313,8 @@ api       hono + @hono/zod-openapi (contract-first routes) · /api/v1 via mountV
           path status ms) and in the audit row · lists: limit (50, max 200) / offset / sort / ids, envelopes { data } and
           { data, meta } · GET /health/live, /health/ready (pluggable checks, 503 + the check list), /version,
           /openapi.json · `npm run contract` writes openapi.json and tests/contract.spec.ts fails when it differs from
-          the code · src/resources/items/ = the example resource (list / get / create / update / soft delete, audited)
+          the code · src/resources/items/ = the example resource (list / get / create / update / soft delete, audited;
+          left out with `--no-sample`)
           · fullstack: the UI gets app/api/schema.d.ts (openapi-typescript), useApi() (openapi-fetch) and a
           compile-time check of the typed client
 db        Kysely · SQLite through node:sqlite (built in — no native module) or MySQL through mysql2 · one migration
@@ -448,6 +457,9 @@ generators (`add resource`, `add job`, `add page`), show that the contract test 
 and require `npm run gate` + `npm run build` green, the generated resource and job working on the built app, and the
 UI e2e suite (generated pages, link previews with crawler user agents) green. `nuxt-app+og+auth+cf-pages` runs the
 e2e suite against wrangler's Pages runtime. `kit-runtime@mysql` also runs the auth runtime tests on MySQL.
+`fullstack+auth+no-sample` and `api+no-sample` scaffold with `--no-sample`: no file, table, route or contract entry
+of the example exists, `/api/v1/items` is a 404 on the built app, and after `add resource` (the project's first)
+gate, build, the built app and the e2e suite are green.
 
 ## Releasing the kit (= the layer)
 

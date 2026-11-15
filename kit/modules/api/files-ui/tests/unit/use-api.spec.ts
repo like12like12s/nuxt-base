@@ -8,6 +8,7 @@ const respond = (body: unknown, status = 200) =>
 
 // The compile-time side (paths, params and bodies are type-checked) is app/api/schema.check.ts.
 describe('useApi', () => {
+  // @kit:if sample
   it('calls the API on the same origin and returns the typed envelope', async () => {
     const item = { id: '1', name: 'Widget', description: null, quantity: 2, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }
     const fetch = respond({ data: [item], meta: { limit: 2, offset: 0, total: 1 } })
@@ -28,4 +29,23 @@ describe('useApi', () => {
     expect(error?.error.code).toBe('NOT_FOUND')
     expect(error?.error.traceId).toBe('abc')
   })
+  // @kit:else
+  it('calls the API on the same origin and returns the typed body', async () => {
+    const fetch = respond({ name: 'app', version: '0.1.0', commit: 'unknown', builtAt: 'unknown', kit: '0.0.0' })
+    vi.stubGlobal('fetch', fetch)
+
+    const { data, error } = await useApi().GET('/version', {})
+    expect(error).toBeUndefined()
+    expect(data?.kit).toBe('0.0.0')
+    expect(new URL(fetch.mock.calls[0]![0].url).pathname).toBe('/version')
+  })
+
+  it('returns the standard error body for a failed call', async () => {
+    vi.stubGlobal('fetch', respond({ error: { code: 'INTERNAL', message: 'Not ready', traceId: 'abc' } }, 503))
+    const { data, error } = await useApi().GET('/health/ready', {})
+    expect(data).toBeUndefined()
+    expect(error?.error.code).toBe('INTERNAL')
+    expect(error?.error.traceId).toBe('abc')
+  })
+  // @kit:end
 })

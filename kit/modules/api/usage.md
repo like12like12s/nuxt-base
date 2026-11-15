@@ -19,6 +19,13 @@ GET /openapi.json    the contract (same content as the committed openapi.json)
   (`ts level msg service env traceId method path status ms`) and in the audit row. Quote it to find a request.
 - Lists: `?limit=50&offset=0&sort=-createdAt` (limit 1-200; out-of-range is a 400, never clamped) and `?ids=a,b` for
   many in one call -> `{ data: [...], meta: { limit, offset, total } }`. One object -> `{ data: {...} }`.
-- New resource: copy `src/resources/items/` (schema -> repo -> routes), register it in `src/app.ts`, add a migration,
-  then `npm run contract` — `tests/contract.spec.ts` fails while `openapi.json` and the code disagree.
+- New resource: `scaffold add resource <name>` (playbook-add-resource.md) — schema -> repo -> routes -> migration ->
+  tests, registered in `src/app.ts`; then `npm run contract` — `tests/contract.spec.ts` fails while `openapi.json`
+  and the code disagree.
+<!-- @kit:if sample -->
+- `src/resources/items/` is the example resource (with its migration `0002_items`, seed rows, tests and the `editor`
+  role). A project that does not want it is created with `--no-sample`; to remove it later, delete those files, its
+  lines in `src/app.ts`, `src/db/migrations/index.ts`, `src/db/schema.ts`, `src/db/seed.ts` and the tests, add a
+  migration that drops the table, and run `npm run contract`.
+<!-- @kit:end -->
 - Probes: `/health/ready` gives each check 2 s — set probe timeout >= 3 s, period >= 10 s, failure threshold >= 3.

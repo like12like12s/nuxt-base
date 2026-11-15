@@ -13,7 +13,11 @@ const t = useApp()
 
 const SECRET = 'proxy-secret-for-tests'
 // Real mode: no dev user; the proxy is identified by the shared secret; groups map onto the app's roles.
+// @kit:if sample
 const REAL = { AUTH_DEV_MODE: '0', AUTH_PROXY_SECRET: SECRET, AUTH_ROLE_MAP: JSON.stringify({ 'app-admins': ['admin'], 'app-editors': ['editor'] }) }
+// @kit:else
+const REAL = { AUTH_DEV_MODE: '0', AUTH_PROXY_SECRET: SECRET, AUTH_ROLE_MAP: JSON.stringify({ 'app-admins': ['admin'] }) }
+// @kit:end
 const fromProxy = (username: string, groups: string) => ({
   [PROXY_SECRET_HEADER]: SECRET,
   'x-authentik-username': username,
@@ -28,6 +32,9 @@ function real() {
   return { app, lines, client, anonymous: client() }
 }
 
+// One column of the matrix per kind of caller. A new role = a caller here (a group AUTH_ROLE_MAP maps to it) and its
+// status in every row below.
+// @kit:if sample
 type Caller = 'anonymous' | 'no role' | 'editor' | 'admin'
 const CALLERS: Record<Caller, Record<string, string>> = {
   anonymous: {},
@@ -35,15 +42,27 @@ const CALLERS: Record<Caller, Record<string, string>> = {
   editor: fromProxy('erin', 'app-editors'),
   admin: fromProxy('alice', 'app-admins'),
 }
+// @kit:else
+type Caller = 'anonymous' | 'no role' | 'admin'
+const CALLERS: Record<Caller, Record<string, string>> = {
+  anonymous: {},
+  'no role': fromProxy('carol', 'some-other-group'),
+  admin: fromProxy('alice', 'app-admins'),
+}
+// @kit:end
 
 // method + route (as declared) -> the status each caller gets. 404 / 400 = allowed in (the id or body is a dummy).
 const MATRIX: Record<string, Record<Caller, number>> = {
+  // @kit:if sample
   'GET /api/v1/items': { anonymous: 401, 'no role': 200, editor: 200, admin: 200 },
   'GET /api/v1/items/:id': { anonymous: 401, 'no role': 404, editor: 404, admin: 404 },
   'POST /api/v1/items': { anonymous: 401, 'no role': 403, editor: 400, admin: 400 },
   'PATCH /api/v1/items/:id': { anonymous: 401, 'no role': 403, editor: 400, admin: 400 },
   'DELETE /api/v1/items/:id': { anonymous: 401, 'no role': 403, editor: 403, admin: 404 },
   'GET /api/v1/me': { anonymous: 401, 'no role': 200, editor: 200, admin: 200 },
+  // @kit:else
+  'GET /api/v1/me': { anonymous: 401, 'no role': 200, admin: 200 },
+  // @kit:end
   // kit:anchor auth-matrix — `scaffold add resource` adds its routes above this line
 }
 
@@ -104,7 +123,11 @@ describe('who is believed', () => {
     const spoofed = { ...fromProxy('mallory', 'app-admins'), [PROXY_SECRET_HEADER]: 'guess' }
     expect((await client(spoofed).get('/api/v1/me')).status).toBe(401)
     const { [PROXY_SECRET_HEADER]: _none, ...bare } = spoofed
+    // @kit:if sample
     expect((await client(bare).delete('/api/v1/items/none')).status).toBe(401)
+    // @kit:else
+    expect((await client(bare).get('/api/v1/me')).status).toBe(401)
+    // @kit:end
     expect(lines.filter((l) => l.msg === 'forward-auth headers ignored')).toHaveLength(2)
     expect(await t.db.selectFrom('users').select('id').execute()).toEqual([])
   })
@@ -114,6 +137,7 @@ describe('who is believed', () => {
     expect((await testClient(app, { headers: fromProxy('alice', 'app-admins') }).get('/api/v1/me')).status).toBe(401)
   })
 
+  // @kit:if sample
   it('a user from the proxy: /me shows the mapped roles, the row lands in `users`, writes are audited under the subject', async () => {
     const { client } = real()
     const admin = client(CALLERS.admin)
@@ -133,6 +157,21 @@ describe('who is believed', () => {
     expect((await bearer(editor.token).get('/api/v1/me')).body.data).toMatchObject({ subject: `service:${editor.id}`, name: 'sync-job', roles: ['editor'], kind: 'service' })
     expect((await bearer(editor.token).post('/api/v1/items', { name: 'By the job' })).status).toBe(201)
     expect((await bearer(editor.token).delete('/api/v1/items/none')).status).toBe(403)
+    // @kit:else
+  // (that a write is audited under the caller's subject is in the test of each resource — `scaffold add resource`)
+  it('a user from the proxy: /me shows the mapped roles and the row lands in `users`', async () => {
+    const { client } = real()
+    const me = await client(CALLERS.admin).get('/api/v1/me')
+    expect(me.body).toEqual({ data: { subject: 'uid-alice', name: 'alice', email: 'alice@example.com', roles: ['admin'], kind: 'user' } })
+    expect((await t.db.selectFrom('users').select(['subject', 'roles']).execute())).toEqual([{ subject: 'uid-alice', roles: '["admin"]' }])
+  })
+
+  it('service tokens: Bearer works with the token\'s roles; revoked and expired ones are 401', async () => {
+    const { client } = real()
+    const editor = await createServiceToken(t.db, { name: 'sync-job', roles: [] })
+    const bearer = (token: string) => client({ authorization: `Bearer ${token}` })
+    expect((await bearer(editor.token).get('/api/v1/me')).body.data).toMatchObject({ subject: `service:${editor.id}`, name: 'sync-job', roles: [], kind: 'service' })
+    // @kit:end
 
     await revokeServiceToken(t.db, 'sync-job')
     expect((await bearer(editor.token).get('/api/v1/me')).status).toBe(401)

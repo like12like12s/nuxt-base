@@ -26,7 +26,7 @@
         { "key": "DB_BACKUP_CMD", "required": false, "secret": false, "example": "", "description": "MySQL: dump command run before a migration; without it `db:migrate` refuses (see usage)" },
         { "key": "DB_MIGRATE_ON_DEPLOY", "required": false, "secret": false, "example": "", "description": "1 = `predeploy` (the container deploy's db-check step) applies pending migrations before it checks the schema" }
       ],
-      "files": [{ "from": "files", "to": "" }],
+      "files": [{ "from": "files", "to": "" }, { "from": "files-sample", "to": "", "when": { "sample": true } }],
       "locked": [
         { "from": "runtime/db/checks.ts", "to": "src/kit/db/checks.ts" },
         { "from": "runtime/db/cli.ts", "to": "src/kit/db/cli.ts" },

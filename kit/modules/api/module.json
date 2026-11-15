@@ -49,12 +49,30 @@
           "to": ""
         },
         {
+          "from": "files-sample",
+          "to": "",
+          "when": {
+            "sample": true
+          }
+        },
+        {
           "from": "variants/openapi.json",
           "to": "openapi.json",
           "when": {
             "without": [
               "auth"
-            ]
+            ],
+            "sample": true
+          }
+        },
+        {
+          "from": "variants/openapi.nosample.json",
+          "to": "openapi.json",
+          "when": {
+            "without": [
+              "auth"
+            ],
+            "sample": false
           }
         }
       ],
@@ -109,7 +127,18 @@
           "when": {
             "without": [
               "auth"
-            ]
+            ],
+            "sample": true
+          }
+        },
+        {
+          "from": "variants/schema.nosample.d.ts",
+          "to": "app/api/schema.d.ts",
+          "when": {
+            "without": [
+              "auth"
+            ],
+            "sample": false
           }
         }
       ],
