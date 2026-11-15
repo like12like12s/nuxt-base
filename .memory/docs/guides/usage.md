@@ -6,7 +6,7 @@ description: How to consume, develop, test and release the nuxt-base layer
 
 ## Consume (any Nuxt 4 app)
 ```ts
-extends: [['github:like12like12s/nuxt-base#v0.1.2']
+extends: [['github:like12like12s/nuxt-base#v0.1.3']
 ```
 - Remove from the app: `@nuxtjs/tailwindcss`, own `tailwindcss()` vite plugin, copied `Btn.vue`/`Modal.vue`/…, scrollbar css, `ssr:false` (layer sets it).
 - Keep in the app: `devServer`, `runtimeConfig`, modules, app-specific head overrides, extra css (loaded after the layer's).

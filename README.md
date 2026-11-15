@@ -12,7 +12,7 @@ npm i -D nuxt@^4.6 && npm i @tailwindcss/vite@^4.3 tailwindcss@^4.3 lucide-vue-n
 ```ts
 // nuxt.config.ts of the app
 export default defineNuxtConfig({
-  extends: ['github:like12like12s/nuxt-base#v0.1.2'],
+  extends: ['github:like12like12s/nuxt-base#v0.1.3'],
   // app-specific only: devServer port, runtimeConfig, modules, extra css…
 })
 ```
