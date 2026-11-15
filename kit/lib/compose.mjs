@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join, posix, resolve, sep } from 'node:path'
 import { incompatible, usageError } from './errors.mjs'
-import { sha256, toJson, walk } from './fsutil.mjs'
+import { lockHash, toJson, walk } from './fsutil.mjs'
 import { mergePackage, stringifyPackage } from './pkg.mjs'
 import { render, undot } from './render.mjs'
 
@@ -359,7 +359,7 @@ export function compose(kit, input) {
   }
 
   const locked = {}
-  for (const path of [...files.keys()].sort()) if (files.get(path).locked) locked[path] = sha256(files.get(path).content)
+  for (const path of [...files.keys()].sort()) if (files.get(path).locked) locked[path] = lockHash(files.get(path).content)
 
   const manifest = {
     kit: kit.version,

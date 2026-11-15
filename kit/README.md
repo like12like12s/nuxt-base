@@ -72,8 +72,12 @@ list    { ok, kitVersion, layerRef, kinds[{ name, description, parts[{ type, dir
   off); `authentikUrl` is named in the operator instructions of the `auth` module. Keys a module does not use are
   ignored.
 - `.scaffold.json` (in every generated project):
-  `{ "kit", "kind", "modules", "db", "deploy", "layerRef", "answers": { name, title, description, port, apiPort, deploy, mysqlHost?, otlpEndpoint?, authentikUrl? }, "locked": { "<path>": "<sha256>" } }`.
+  `{ "kit", "kind", "modules", "db", "deploy", "layerRef", "answers": { name, title, description, port, apiPort, deploy, mysqlHost?, otlpEndpoint?, authentikUrl? }, "locked": { "<path>": "sha256:<hex>" } }`.
   `answers` is everything needed to re-compose the project, which is how `check` / `update` / `add` work.
+  A locked hash carries its algorithm prefix on purpose: a bare 64-character hex value beside a key such as
+  `…/tokens.ts` is what secret scanners report as a generic API key, and a fresh project must pass a default
+  `gitleaks protect` / `gitleaks detect` on its first commit (unit test + a step of the kit gate). Manifests written
+  with bare hex (kit <= 0.2.0) are read as before; `update` rewrites them.
 
 ### check / update
 
@@ -359,7 +363,9 @@ tailnet IPv4 address, a `.int.` hostname, an internal host alias or anything sha
 tests run on SQLite; with `TEST_MYSQL_URL=mysql://<user>:<password>@<host>:3306` (a user that may create and drop
 `test_*` schemas) they also run on MySQL, and say `SKIPPED` loudly when it is not set.
 
-The kit gate additionally proves, per combo: locked files survive install and build; the API refuses to boot without
+The kit gate additionally proves, per combo: the first commit of the fresh project passes `gitleaks protect --staged`
+and `gitleaks detect` with the default config, and the machine's own pre-commit hook when it has one (`NOTICE …
+SKIPPED` without the binary); locked files survive install and build; the API refuses to boot without
 `PORT` and names it, then boots, answers `/health/live` and exits 0 on SIGTERM; the built UI serves the SPA (and passes
 its playwright suite on the base `nuxt-app` combo); the pm2 file loads and points at real build output; with docker
 available, each image builds, runs as `node` and answers its health path (`NOTICE … SKIPPED` otherwise); and an edited

@@ -5,6 +5,13 @@ import { usageError } from './errors.mjs'
 
 export const sha256 = (data) => createHash('sha256').update(data).digest('hex')
 
+// How a locked file's hash is written in .scaffold.json: `sha256:<hex>`. A bare 64-character hex string next to a key
+// like "…/tokens.ts" is exactly what secret scanners call a generic API key (gitleaks stopped the first commit of a
+// fresh project on it); with the algorithm prefix the value no longer has the shape of a credential. Manifests written
+// before this (bare hex) are still read.
+export const lockHash = (data) => `sha256:${sha256(data)}`
+export const bareHash = (recorded) => (typeof recorded === 'string' ? recorded.replace(/^sha256:/, '') : recorded)
+
 export function readJson(file) {
   return JSON.parse(readFileSync(file, 'utf8'))
 }

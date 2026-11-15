@@ -62,7 +62,7 @@ describe('new — composition', () => {
     expect(Object.keys(m.locked).sort()).toEqual([...r.json.locked].sort())
     expect(Object.keys(m.locked)).toEqual(['scripts/gate-ci.mjs', 'src/kit/api/context.ts', 'src/kit/api/env.ts', 'src/kit/api/log.ts', 'src/kit/api/shutdown.ts'])
     const hashes = snapshot(dir)
-    for (const [path, hash] of Object.entries(m.locked)) expect(hashes[path], path).toBe(hash)
+    for (const [path, hash] of Object.entries(m.locked)) expect(`sha256:${hashes[path]}`, path).toBe(hash)
     for (const path of Object.keys(m.locked)) expect(read(dir, path), path).toMatch(/DO NOT EDIT/)
   })
 

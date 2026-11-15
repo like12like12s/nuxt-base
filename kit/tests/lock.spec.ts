@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { spawnSync } from 'node:child_process'
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -12,6 +13,62 @@ function project(args: string[], kit?: string) {
   expect(r.status).toBe(0)
   return dir
 }
+
+// Finding #2: gitleaks (rule generic-api-key) stopped the very first commit of a fresh project on the bare sha256 of
+// `…/kit/auth/tokens.ts` in .scaffold.json. The hash is now written as `sha256:<hex>`.
+describe('.scaffold.json and secret scanners', () => {
+  const FULL = ['--kind', 'fullstack', '--with', 'db,auth,api,trace,og,security,jobs,notify', '--deploy', 'container']
+
+  it('locked hashes carry the algorithm prefix; none is a bare hex string', () => {
+    const locked = JSON.parse(read(project(FULL), '.scaffold.json')).locked as Record<string, string>
+    expect(Object.keys(locked).length).toBeGreaterThan(30)
+    for (const [path, hash] of Object.entries(locked)) expect(hash, path).toMatch(/^sha256:[0-9a-f]{64}$/)
+  })
+
+  it('a manifest with bare hashes (kit <= 0.2.0) is still clean; update rewrites it in the new form and changes no file', () => {
+    const dir = project(FULL)
+    const file = join(dir, '.scaffold.json')
+    const manifest = JSON.parse(readFileSync(file, 'utf8'))
+    for (const path of Object.keys(manifest.locked)) manifest.locked[path] = manifest.locked[path].replace(/^sha256:/, '')
+    writeFileSync(file, JSON.stringify(manifest, null, 2) + '\n')
+    const before = snapshot(dir)
+    const check = cli(['check', dir, '--json'])
+    expect(check.status, check.stdout).toBe(0)
+    expect(check.json.drift).toEqual([])
+    // an edit is still found through the old form
+    appendFileSync(join(dir, 'api/src/kit/auth/tokens.ts'), '\n// edited\n')
+    expect(cli(['check', dir, '--json']).json.drift).toEqual([{ path: 'api/src/kit/auth/tokens.ts', reason: 'modified' }])
+    const update = cli(['update', dir, '--json'])
+    expect(update.json.updated).toEqual(['api/src/kit/auth/tokens.ts'])
+    const after = snapshot(dir)
+    expect(Object.keys(after).filter((path) => after[path] !== before[path])).toEqual(['.scaffold.json'])
+    for (const hash of Object.values(JSON.parse(readFileSync(file, 'utf8')).locked)) expect(hash).toMatch(/^sha256:/)
+  })
+
+  const hasGitleaks = !spawnSync('gitleaks', ['version'], { stdio: 'ignore' }).error
+  if (!hasGitleaks) process.stderr.write('SKIPPED: gitleaks is not installed — the default-config scan of a fresh scaffold did not run (the kit gate and CI run it)\n')
+  it.skipIf(!hasGitleaks)('a fresh project passes `gitleaks protect --staged` and `gitleaks detect` with the default config — and the scan is real', () => {
+    const dir = project(FULL)
+    // no repo config and no machine-wide one: the scanner's built-in rules
+    const env = { ...process.env, GITLEAKS_CONFIG: '', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' }
+    const git = (...args: string[]) => spawnSync('git', ['-c', 'user.name=kit', '-c', 'user.email=kit@example.invalid', ...args], { cwd: dir, env, encoding: 'utf8' })
+    expect(git('init', '-q').status).toBe(0)
+    expect(git('add', '-A').status).toBe(0)
+    const staged = spawnSync('gitleaks', ['protect', '--staged', '--no-banner', '--redact', '-v'], { cwd: dir, env, encoding: 'utf8' })
+    expect(staged.status, staged.stdout + staged.stderr).toBe(0)
+    expect(git('commit', '-q', '-m', 'scaffold').status).toBe(0)
+    const detect = spawnSync('gitleaks', ['detect', '--source', '.', '--no-banner', '--redact', '-v'], { cwd: dir, env, encoding: 'utf8' })
+    expect(detect.status, detect.stdout + detect.stderr).toBe(0)
+
+    // the same scan does fail on the old form — so the two green runs above mean something
+    const file = join(dir, '.scaffold.json')
+    writeFileSync(file, readFileSync(file, 'utf8').replaceAll('"sha256:', '"'))
+    git('add', '-A')
+    const old = spawnSync('gitleaks', ['protect', '--staged', '--no-banner', '--redact', '-v'], { cwd: dir, env, encoding: 'utf8' })
+    expect(old.status).toBe(1)
+    expect(old.stdout + old.stderr).toMatch(/\.scaffold\.json/)
+  })
+})
 
 describe('check', () => {
   it('a fresh project is clean (exit 0)', () => {

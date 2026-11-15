@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Kit gate (`npm run gate:kit`): for every combo in combos.mjs — scaffold into a fresh temp dir, `npm install`,
 // `npm run gate`, build, then prove the result runs (boot + health, env fail-fast, check/update, pm2 file, image build).
+// With gitleaks installed, every project is also committed first and that commit must pass the secret scan.
 // Projects with the db module also run their suite and their built CLI against MySQL: TEST_MYSQL_URL if set
 // (mysql://<user>:<password>@<host>:3306, a user that may create `test_*` schemas), else a throwaway mysql container
 // when docker is available, else a loud NOTICE … SKIPPED. The data-layer unit tests of the kit run there too.
@@ -40,6 +41,7 @@ const selected = [...combos, RUNTIME_ON_MYSQL].filter((c) => !flags.only || c.id
 if (flags.list) { for (const c of selected) console.log(c.id); process.exit(0) }
 if (!selected.length) { console.error(`kit gate: no combo matches --only ${flags.only}`); process.exit(2) }
 
+const gitleaks = !spawnSync('gitleaks', ['version'], { stdio: 'ignore', timeout: 15_000 }).error
 const docker = !flags['no-docker'] && spawnSync('docker', ['info'], { stdio: 'ignore', timeout: 15_000 }).status === 0
 const latestTag = spawnSync('git', ['-C', REPO, 'describe', '--tags', '--abbrev=0'], { encoding: 'utf8' }).stdout.trim()
 const tagRef = flags['layer-ref'] ?? (latestTag ? `github:like12like12s/nuxt-base#${latestTag}` : null)
@@ -242,6 +244,21 @@ async function gateCombo(combo, index) {
       }
     }
     const dbEnv = databaseUrl ? { DATABASE_URL: databaseUrl } : {}
+
+    // The first commit of a fresh project, the way a developer machine makes it: a secret scanner in a pre-commit
+    // hook must let it through (it once stopped on the hashes in .scaffold.json). Explicitly with gitleaks' default
+    // config — staged, then the committed history — and the commit itself runs whatever hook this machine has.
+    if (gitleaks) {
+      begin('git: first commit passes gitleaks (protect --staged, the machine\'s own hook, detect)')
+      const git = (gitArgs) => run(log, 'git', ['-c', 'user.name=kit-gate', '-c', 'user.email=kit-gate@example.invalid', '-c', 'commit.gpgsign=false', ...gitArgs], { cwd: dir, timeout: 60_000 })
+      await git(['init', '-q'])
+      await git(['add', '-A'])
+      await run(log, 'gitleaks', ['protect', '--staged', '--no-banner', '--redact', '-v'], { cwd: dir, timeout: 60_000, extraEnv: { GITLEAKS_CONFIG: '' } })
+      await git(['commit', '-q', '-m', 'scaffold'])
+      await run(log, 'gitleaks', ['detect', '--source', '.', '--no-banner', '--redact', '-v'], { cwd: dir, timeout: 60_000, extraEnv: { GITLEAKS_CONFIG: '' } })
+    } else if (index === 0) {
+      console.log('NOTICE gitleaks is not installed — the first-commit secret scan of the generated projects is SKIPPED')
+    }
 
     begin('npm install')
     await run(log, 'npm', ['install', '--no-audit', '--no-fund'], { cwd: dir, timeout: 900_000 })

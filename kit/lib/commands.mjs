@@ -4,7 +4,7 @@ import { join, posix, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { compose, composeFromManifest } from './compose.mjs'
 import { EXIT, existsError, incompatible, usageError } from './errors.mjs'
-import { inside, isEmptyOrMissing, pathExists, readJson, sha256, symlinkUnder, toJson, writeFileUnder } from './fsutil.mjs'
+import { bareHash, inside, isEmptyOrMissing, pathExists, readJson, sha256, symlinkUnder, toJson, writeFileUnder } from './fsutil.mjs'
 import { GENERATOR_TYPES, LAYER_REPO, isBehind } from './kit.mjs'
 import { reservedName } from './names.mjs'
 
@@ -75,8 +75,9 @@ function diff(kit, dir) {
     if (!(path in recorded)) { drift.push({ path, reason: 'new-in-kit' }); continue }
     const abs = inside(dir, path)
     if (!existsSync(abs)) drift.push({ path, reason: 'missing' })
-    else if (sha256(readFileSync(abs)) !== recorded[path]) drift.push({ path, reason: 'modified' })
-    else if (recorded[path] !== plan.locked[path]) drift.push({ path, reason: 'outdated' })
+    // bareHash: a manifest written before the `sha256:` prefix holds bare hex — the same file is not drift.
+    else if (sha256(readFileSync(abs)) !== bareHash(recorded[path])) drift.push({ path, reason: 'modified' })
+    else if (bareHash(recorded[path]) !== bareHash(plan.locked[path])) drift.push({ path, reason: 'outdated' })
   }
   const ui = plan.parts.find((p) => p.type === 'ui')
   let layer = null
