@@ -1,0 +1,27 @@
+# {{kit.name}} — compose file for the deploy host (/srv/{{kit.name}}/). The repo copy is the source of truth: the
+# deploy script syncs it. Tags live in .env next to it (API_TAG / UI_TAG) — rollback = deploy-docker.sh --rollback <tag>.
+# Data the app writes goes to ./data (bind mount). Never keep data inside the container.
+name: {{kit.name}}
+services:
+  api:
+    image: {{kit.registry}}/{{kit.name}}-api:${API_TAG:-latest}
+    container_name: {{kit.name}}-api
+    restart: unless-stopped
+    init: true   # node as PID 1 ignores SIGTERM: without init every stop waits for the kill timeout
+    ports:
+      - "${API_PORT:-{{kit.apiPort}}}:3000"
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+  ui:
+    image: {{kit.registry}}/{{kit.name}}-ui:${UI_TAG:-latest}
+    container_name: {{kit.name}}-ui
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${UI_PORT:-{{kit.uiPort}}}:3000"
+    environment:
+      API_URL: http://{{kit.name}}-api:3000   # over the compose network, no host port involved
+    depends_on:
+      api:
+        condition: service_healthy

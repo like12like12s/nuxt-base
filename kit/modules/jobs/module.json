@@ -1,0 +1,10 @@
+{
+  "name": "jobs",
+  "status": "planned",
+  "description": "Job skeleton + scheduler registration",
+  "kinds": [
+    "api",
+    "fullstack"
+  ],
+  "requires": []
+}

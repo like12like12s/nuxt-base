@@ -1,0 +1,21 @@
+{
+  "name": "cf-pages",
+  "description": "Cloudflare Pages: nitro preset cloudflare-pages + wrangler scripts (build output dist/)",
+  "kinds": ["nuxt-app"],
+  "contributes": {
+    "ui": {
+      "package": {
+        "scripts": {
+          "serve": "wrangler pages dev dist --ip 127.0.0.1 --port ${PORT:-8788}",
+          "cf:create": "wrangler pages project create {{kit.name}} --production-branch main",
+          "deploy": "npm run gate && npm run build && wrangler pages deploy dist --project-name {{kit.name}} --branch main --commit-dirty=true"
+        },
+        "devDependencies": { "wrangler": "^4.162.0" }
+      },
+      "nuxtConfig": ["nitro: { preset: 'cloudflare-pages' },"],
+      "gitignore": [".wrangler/"],
+      "usage": "usage.md",
+      "next": ["npx wrangler whoami   # then: npm run cf:create (once) and npm run deploy"]
+    }
+  }
+}

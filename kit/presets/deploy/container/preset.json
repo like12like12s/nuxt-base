@@ -1,0 +1,36 @@
+{
+  "name": "container",
+  "description": "Container deploy: multi-stage Dockerfile per part (locked), compose file, deploy.conf filled from --context",
+  "kinds": ["nuxt-app", "api", "fullstack"],
+  "contributes": {
+    "api": {
+      "locked": [
+        { "from": "presets/deploy/container/files/api.Dockerfile", "to": "Dockerfile" },
+        { "from": "presets/deploy/container/files/dockerignore", "to": ".dockerignore" }
+      ],
+      "symlinks": [{ "path": "api", "target": ".", "when": { "kind": ["api"] } }]
+    },
+    "ui": {
+      "locked": [
+        { "from": "presets/deploy/container/files/ui.Dockerfile", "to": "Dockerfile" },
+        { "from": "presets/deploy/container/files/dockerignore", "to": ".dockerignore" }
+      ],
+      "symlinks": [{ "path": "web", "target": ".", "when": { "kind": ["nuxt-app"] } }]
+    },
+    "project": {
+      "files": [
+        { "from": "files/compose.nuxt-app.yml", "to": "docker/docker-compose.yml", "when": { "kind": ["nuxt-app"] } },
+        { "from": "files/compose.api.yml", "to": "docker/docker-compose.yml", "when": { "kind": ["api"] } },
+        { "from": "files/compose.fullstack.yml", "to": "docker/docker-compose.yml", "when": { "kind": ["fullstack"] } },
+        { "from": "files/deploy.nuxt-app.conf", "to": "docker/deploy.conf", "when": { "kind": ["nuxt-app"] } },
+        { "from": "files/deploy.api.conf", "to": "docker/deploy.conf", "when": { "kind": ["api"] } },
+        { "from": "files/deploy.fullstack.conf", "to": "docker/deploy.conf", "when": { "kind": ["fullstack"] } },
+        { "from": "files/env.nuxt-app.example", "to": "docker/env.example", "when": { "kind": ["nuxt-app"] } },
+        { "from": "files/env.api.example", "to": "docker/env.example", "when": { "kind": ["api"] } },
+        { "from": "files/env.fullstack.example", "to": "docker/env.example", "when": { "kind": ["fullstack"] } }
+      ],
+      "usage": "usage.md",
+      "next": ["copy deploy-docker.sh from your docker-node template into docker/ (kept identical everywhere by that template's own check), then review docker/deploy.conf"]
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "ci-github",
+  "status": "ready",
+  "description": "Opt-in GitHub Actions workflow that runs `npm run gate:ci` (the default CI is the local gate + Pilot)",
+  "kinds": ["nuxt-app", "api", "fullstack"],
+  "requires": [],
+  "contributes": {
+    "project": {
+      "files": [{ "from": "files", "to": "" }]
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "testkit",
+  "status": "planned",
+  "description": "Deterministic factories, throwaway test DB, e2e helpers",
+  "kinds": [
+    "nuxt-app",
+    "api",
+    "fullstack"
+  ],
+  "requires": []
+}

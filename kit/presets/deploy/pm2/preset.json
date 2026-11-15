@@ -1,0 +1,16 @@
+{
+  "name": "pm2",
+  "description": "pm2 ecosystem.config.cjs (time: true, port from env) — started through the Pilot API, never by hand",
+  "kinds": ["nuxt-app", "api", "fullstack"],
+  "contributes": {
+    "project": {
+      "files": [
+        { "from": "files/ecosystem.nuxt-app.cjs", "to": "ecosystem.config.cjs", "when": { "kind": ["nuxt-app"] } },
+        { "from": "files/ecosystem.api.cjs", "to": "ecosystem.config.cjs", "when": { "kind": ["api"] } },
+        { "from": "files/ecosystem.fullstack.cjs", "to": "ecosystem.config.cjs", "when": { "kind": ["fullstack"] } }
+      ],
+      "usage": "usage.md",
+      "next": ["npm run build, register the services in Pilot, then start them through the Pilot API (see usage.md) — never `pm2 start` by hand"]
+    }
+  }
+}

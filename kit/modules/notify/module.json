@@ -1,0 +1,10 @@
+{
+  "name": "notify",
+  "status": "planned",
+  "description": "Client for the central notifier",
+  "kinds": [
+    "api",
+    "fullstack"
+  ],
+  "requires": []
+}

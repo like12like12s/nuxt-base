@@ -1,0 +1,14 @@
+node_modules
+dist
+.nuxt
+.output
+.output-*
+data
+.env
+*.log
+test-results
+playwright-report
+.git
+docker
+api
+web

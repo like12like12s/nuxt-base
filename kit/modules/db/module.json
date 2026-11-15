@@ -1,0 +1,10 @@
+{
+  "name": "db",
+  "status": "planned",
+  "description": "Kysely + migrations + seed + base tables + pool timeout/retry + schema check + backup registration",
+  "kinds": [
+    "api",
+    "fullstack"
+  ],
+  "requires": []
+}

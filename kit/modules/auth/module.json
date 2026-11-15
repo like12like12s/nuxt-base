@@ -1,0 +1,11 @@
+{
+  "name": "auth",
+  "status": "planned",
+  "description": "Authentik forward-auth -> user + roles, requireRole, service tokens",
+  "kinds": [
+    "api",
+    "fullstack",
+    "nuxt-app"
+  ],
+  "requires": []
+}

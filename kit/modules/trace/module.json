@@ -1,0 +1,10 @@
+{
+  "name": "trace",
+  "status": "planned",
+  "description": "OpenTelemetry (OTLP) + JSON logs carrying the traceId",
+  "kinds": [
+    "api",
+    "fullstack"
+  ],
+  "requires": []
+}

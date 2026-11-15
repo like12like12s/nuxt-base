@@ -1,0 +1,17 @@
+{
+  "name": "base",
+  "status": "ready",
+  "description": "Always included: README, brief, .memory docs, .scaffold.json, gate + gate:ci (gitleaks, npm audit)",
+  "kinds": ["nuxt-app", "api", "fullstack"],
+  "requires": [],
+  "contributes": {
+    "project": {
+      "package": {
+        "scripts": { "gate:ci": "node scripts/gate-ci.mjs" }
+      },
+      "files": [{ "from": "files", "to": "" }],
+      "locked": [{ "from": "runtime/project/gate-ci.mjs", "to": "scripts/gate-ci.mjs" }],
+      "gitignore": ["node_modules/", ".env", "*.log"]
+    }
+  }
+}

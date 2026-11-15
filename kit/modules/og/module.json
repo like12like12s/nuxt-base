@@ -1,0 +1,10 @@
+{
+  "name": "og",
+  "status": "planned",
+  "description": "OG / Twitter meta per URL",
+  "kinds": [
+    "nuxt-app",
+    "fullstack"
+  ],
+  "requires": []
+}

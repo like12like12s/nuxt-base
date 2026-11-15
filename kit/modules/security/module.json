@@ -1,0 +1,10 @@
+{
+  "name": "security",
+  "status": "planned",
+  "description": "Security headers, CORS allowlist, basic rate limit",
+  "kinds": [
+    "api",
+    "fullstack"
+  ],
+  "requires": []
+}

@@ -1,0 +1,10 @@
+{
+  "name": "api",
+  "status": "planned",
+  "description": "Full API standard: hono + zod-openapi, /api/v1, error shape with traceId, pagination, health live/ready, openapi.json, typed client",
+  "kinds": [
+    "api",
+    "fullstack"
+  ],
+  "requires": []
+}
