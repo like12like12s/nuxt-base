@@ -1,0 +1,58 @@
+import { createHash } from 'node:crypto'
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { dirname, join, relative, resolve, sep } from 'node:path'
+import { usageError } from './errors.mjs'
+
+export const sha256 = (data) => createHash('sha256').update(data).digest('hex')
+
+export function readJson(file) {
+  return JSON.parse(readFileSync(file, 'utf8'))
+}
+
+// Stable JSON: 2-space indent + trailing newline. Key order is the caller's responsibility.
+export const toJson = (value) => JSON.stringify(value, null, 2) + '\n'
+
+// Every file under `dir`, as sorted posix-style relative paths (sorted = deterministic output order).
+// Symlinks are listed, never followed (a single-app container project has a `web -> .` service dir).
+export function walk(dir) {
+  const out = []
+  const visit = (abs) => {
+    for (const name of readdirSync(abs).sort()) {
+      const child = join(abs, name)
+      if (lstatSync(child).isDirectory()) visit(child)
+      else out.push(relative(dir, child).split(sep).join('/'))
+    }
+  }
+  visit(dir)
+  return out.sort()
+}
+
+export function isEmptyOrMissing(dir) {
+  if (!existsSync(dir)) return true
+  if (!statSync(dir).isDirectory()) return false
+  return readdirSync(dir).length === 0
+}
+
+// Resolve `rel` under `root` and refuse anything that escapes it — the generator only ever writes under --dir.
+export function inside(root, rel) {
+  const abs = resolve(root, rel)
+  const base = resolve(root)
+  if (abs !== base && !abs.startsWith(base + sep)) throw usageError(`path escapes the target dir: ${rel}`, 'path_escape')
+  return abs
+}
+
+export function writeFileUnder(root, rel, content, mode) {
+  const abs = inside(root, rel)
+  mkdirSync(dirname(abs), { recursive: true })
+  writeFileSync(abs, content, mode ? { mode } : undefined)
+}
+
+export function symlinkUnder(root, rel, target) {
+  const abs = inside(root, rel)
+  mkdirSync(dirname(abs), { recursive: true })
+  symlinkSync(target, abs)
+}
+
+export const pathExists = (p) => {
+  try { lstatSync(p); return true } catch { return false }
+}
