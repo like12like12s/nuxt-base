@@ -154,7 +154,7 @@ Rules that keep the output deterministic — **same inputs, byte-identical outpu
   `package.json` fragments merge key by key and the later unit wins; dependency maps are written sorted.
 - Templates may use `{{kit.<var>}}` only (Vue's own `{{ }}` is untouched). An unknown variable is an error. Variables:
   `name title description titleJson descriptionJson kind kitVersion layerRef modules db deploy port uiPort apiPort
-  apiDir uiDir dir registry deployHost deployDomain deployUser mysqlHost dbName databaseUrlExample rateLimitDefault
+  e2ePort apiDir uiDir dir registry deployHost deployDomain deployUser mysqlHost dbName databaseUrlExample rateLimitDefault
   services nuxtConfig
   usageSections`. Use the `*Json` forms inside source code — they are quoted and escaped.
 - No clock, no randomness, no environment lookups in a template or in `lib/compose.mjs`.
@@ -229,7 +229,8 @@ written for an agent working inside the project, where it lands as `.memory/docs
 
 ```
 nuxt-app    Nuxt 4 SPA extending the layer by git tag · DESIGN.md · vitest (nuxt env) · playwright e2e against the
-            built app that fails on any pageerror / console error · gate = typecheck + unit · security headers on
+            built app that fails on any pageerror / console error, served on the project's own e2e port (UI port
+            + 10000; `E2E_PORT` overrides) so two projects can run e2e at once · gate = typecheck + unit · security headers on
             every page (nosniff, no framing, referrer policy) through `routeRules`
 api         hono on Node (tsx dev, tsc build -> dist/) · src/config.ts = zod env schema: a missing key stops the boot
             and is named, no value is ever printed · /health/live · one JSON log line per request · graceful shutdown

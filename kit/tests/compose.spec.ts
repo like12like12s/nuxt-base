@@ -121,6 +121,19 @@ describe('new — composition', () => {
   })
 })
 
+// Finding #17: every project served its e2e build on 3999, so two kit projects could not run e2e at the same time.
+describe('new — e2e port', () => {
+  const e2e = (args: string[]) => /Number\(process\.env\.E2E_PORT\) \|\| (\d+)/.exec(read(scaffold(args).dir, args.includes('fullstack') ? 'ui/playwright.config.ts' : 'playwright.config.ts'))![1]
+  it('derives from the project\'s own UI port — two projects never share it, and none uses a fixed one', () => {
+    expect(e2e(['--kind', 'nuxt-app'])).toBe('13000')
+    expect(e2e(['--kind', 'nuxt-app', '--port', '3100'])).toBe('13100')
+    expect(e2e(['--kind', 'fullstack', '--port', '3200'])).toBe('13201') // the UI port of a fullstack project is base + 1
+    expect(e2e(['--kind', 'fullstack', '--port', '3200', '--api-port', '3300'])).toBe('13200')
+    expect(e2e(['--kind', 'nuxt-app', '--port', '60000'])).toBe('50000') // stays inside the port range
+    for (const kind of ['nuxt-app', 'fullstack']) expect(read(scaffold(['--kind', kind]).dir, kind === 'fullstack' ? 'ui/playwright.config.ts' : 'playwright.config.ts')).not.toContain('3999')
+  })
+})
+
 describe('new — deploy presets and CI', () => {
   it('cf-pages: nitro preset + wrangler scripts', () => {
     const { dir } = scaffold(['--kind', 'nuxt-app', '--deploy', 'cf-pages'])

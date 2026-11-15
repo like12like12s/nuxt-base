@@ -88,6 +88,11 @@ function validateContext(input, lenient = false) {
   return { context, warnings }
 }
 
+// The port the UI's e2e suite serves the built app on. Derived from the project's own (registered, therefore unique)
+// UI port, so two kit projects on one machine never fight over one fixed port: UI port + 10000, or - 10000 when that
+// would leave the port range. E2E_PORT still overrides it.
+export const e2ePort = (uiPort) => (uiPort + 10000 <= 65535 ? uiPort + 10000 : uiPort - 10000)
+
 const titleCase = (name) => name.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ')
 const csv = (list) => (list.length ? list.join(', ') : 'none')
 
@@ -257,6 +262,7 @@ export function compose(kit, input) {
     port: sel.ports.ui,
     uiPort: sel.ports.ui,
     apiPort: sel.ports.api,
+    e2ePort: e2ePort(sel.ports.ui),
     apiDir: partDir('api') || '.',
     uiDir: partDir('ui') || '.',
     registry: deploy.registry,

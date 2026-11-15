@@ -1,7 +1,8 @@
 import { defineConfig } from '@playwright/test'
 
 // Runs against the BUILT app (npm run test:e2e builds first) — the same artefact a deploy ships.
-const port = Number(process.env.E2E_PORT) || 3999
+// The port is this project's own (its UI port {{kit.uiPort}} + 10000 — no two projects share it); E2E_PORT overrides it.
+const port = Number(process.env.E2E_PORT) || {{kit.e2ePort}}
 export default defineConfig({
   testDir: 'tests/e2e',
   timeout: 30_000,
