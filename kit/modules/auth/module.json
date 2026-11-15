@@ -1,11 +1,45 @@
 {
   "name": "auth",
-  "status": "planned",
-  "description": "Authentik forward-auth -> user + roles, requireRole, service tokens",
-  "kinds": [
-    "api",
-    "fullstack",
-    "nuxt-app"
+  "status": "ready",
+  "description": "Authentik forward-auth (headers believed only from the trusted proxy) -> users + roles, publicRoute / requireAuth / requireRole with a rule that every route declares one, service tokens (hash only, expiry, revoke), explicit dev mode. UI: the layer's useAuth reads GET /api/v1/me",
+  "kinds": ["api", "fullstack", "nuxt-app"],
+  "requires": [
+    { "name": "api", "kinds": ["api", "fullstack"] },
+    { "name": "db", "kinds": ["api", "fullstack"] }
   ],
-  "requires": []
+  "contributes": {
+    "api": {
+      "package": {
+        "scripts": {
+          "auth:token": "tsx --env-file-if-exists=.env src/auth/cli.ts token"
+        }
+      },
+      "env": [
+        { "key": "AUTH_PROXY_SECRET", "required": false, "secret": true, "example": "", "description": "Shared secret the reverse proxy adds as `x-auth-proxy-secret` (>= 16 chars). Forward-auth headers are believed only with it and/or AUTH_TRUSTED_PROXIES" },
+        { "key": "AUTH_TRUSTED_PROXIES", "required": false, "secret": false, "example": "", "description": "Addresses / CIDR ranges of the reverse proxy (the TCP peer), comma-separated" },
+        { "key": "AUTH_ROLE_MAP", "required": false, "secret": false, "example": "", "description": "JSON: identity-provider group -> roles, e.g. {\"app-admins\":[\"admin\"],\"app-editors\":[\"editor\"]}" },
+        { "key": "AUTH_DEV_MODE", "required": false, "secret": false, "example": "", "description": "1 = every request is the fixed dev user with all roles. Development only: the API refuses to start with it when NODE_ENV=production" }
+      ],
+      "files": [
+        { "from": "files", "to": "" },
+        { "from": "variants/openapi.json", "to": "openapi.json" }
+      ],
+      "locked": [
+        { "from": "runtime/auth/cli.ts", "to": "src/kit/auth/cli.ts" },
+        { "from": "runtime/auth/guard.ts", "to": "src/kit/auth/guard.ts" },
+        { "from": "runtime/auth/proxy.ts", "to": "src/kit/auth/proxy.ts" },
+        { "from": "runtime/auth/tokens.ts", "to": "src/kit/auth/tokens.ts" },
+        { "from": "runtime/auth/users.ts", "to": "src/kit/auth/users.ts" }
+      ],
+      "usage": "usage.md",
+      "next": ["{{kit.apiDir}}: local development — set AUTH_DEV_MODE=1 in .env (never in production); production — see \"Auth\" in .memory/docs/guides/usage.md for what the reverse proxy and the identity provider must be given"]
+    },
+    "ui": {
+      "files": [
+        { "from": "files-ui", "to": "" },
+        { "from": "variants/schema.d.ts", "to": "app/api/schema.d.ts", "when": { "with": ["api"] } }
+      ],
+      "usage": "usage-ui.md"
+    }
+  }
 }

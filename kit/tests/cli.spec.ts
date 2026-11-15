@@ -59,7 +59,6 @@ describe('exit codes', () => {
   it.each([
     ['unknown kind', ['--kind', 'django'], 'unknown_kind'],
     ['unknown module', ['--kind', 'api', '--with', 'nope'], 'unknown_module'],
-    ['planned module', ['--kind', 'api', '--with', 'auth'], 'planned_module'],
     ['unknown preset', ['--kind', 'api', '--deploy', 'heroku'], 'unknown_preset'],
     ['cf-pages on api', ['--kind', 'api', '--deploy', 'cf-pages'], 'incompatible_preset'],
     ['cf-pages on fullstack', ['--kind', 'fullstack', '--deploy', 'cf-pages'], 'incompatible_preset'],
@@ -72,13 +71,19 @@ describe('exit codes', () => {
     expect(cli(['check', dir, '--json']).status).toBe(2) // nothing was written
   })
 
-  it('4 — every planned module is refused with a clear message', () => {
-    const planned = cli(['list', '--json']).json.modules.filter((m: any) => m.status === 'planned')
-    expect(planned.map((m: any) => m.name)).toEqual(['auth', 'jobs', 'notify', 'og', 'security', 'trace'])
-    for (const m of planned) {
-      const r = cli(['new', 'demo-app', '--kind', m.kinds[0], '--with', m.name, '--dir', target(), '--json'])
-      expect(r.status, m.name).toBe(4)
-      expect(r.json.message).toMatch(new RegExp(`module "${m.name}" is planned but not available in kit`))
+  it('4 — a planned module is listed but refused with a clear message, also when another module requires it', () => {
+    const kit = cloneKit()
+    mkdirSync(join(kit, 'modules', 'uploads'), { recursive: true })
+    writeFileSync(join(kit, 'modules', 'uploads', 'module.json'), JSON.stringify({ name: 'uploads', status: 'planned', description: 'not built yet', kinds: ['api'], requires: [] }))
+    expect(cli(['list', '--json'], { kit }).json.modules.find((m: any) => m.name === 'uploads')).toMatchObject({ status: 'planned', kinds: ['api'] })
+    const dir = target()
+    const r = cli(['new', 'demo-app', '--kind', 'api', '--with', 'uploads', '--dir', dir, '--json'], { kit })
+    expect(r.status).toBe(4)
+    expect(r.json).toEqual({ ok: false, code: 'planned_module', message: expect.stringMatching(/module "uploads" is planned but not available in kit/) })
+    expect(cli(['check', dir, '--json'], { kit }).status).toBe(2) // nothing was written
+    // whatever is still planned in the real kit behaves the same
+    for (const m of cli(['list', '--json']).json.modules.filter((m: any) => m.status === 'planned')) {
+      expect(cli(['new', 'demo-app', '--kind', m.kinds[0], '--with', m.name, '--dir', target(), '--json']).status, m.name).toBe(4)
     }
   })
 
@@ -90,7 +95,8 @@ describe('exit codes', () => {
     }
     mod('ui-only', { kinds: ['nuxt-app'] })
     mod('needs-ci', { kinds: ['api'], requires: ['ci-github'] })
-    mod('needs-planned', { kinds: ['api'], requires: ['auth'] })
+    mod('later', { kinds: ['api'], status: 'planned' })
+    mod('needs-planned', { kinds: ['api'], requires: ['later'] })
     const bad = cli(['new', 'demo-app', '--kind', 'api', '--with', 'ui-only', '--dir', target(), '--json'], { kit })
     expect(bad.status).toBe(4)
     expect(bad.json.code).toBe('incompatible_module')

@@ -127,7 +127,12 @@ describe('items — pagination', () => {
 })
 
 describe('items — audit', () => {
-  const auditRows = () => t.db.selectFrom('audit').selectAll().orderBy('ts', 'asc').orderBy('id', 'asc').execute()
+  const auditRows = () => t.db.selectFrom('audit').selectAll().where('action', 'like', 'item.%').orderBy('ts', 'asc').orderBy('id', 'asc').execute()
+  // @kit:if auth
+  const ACTOR = 'dev' // the tests run as the dev user (tests/helpers.ts)
+  // @kit:else
+  const ACTOR = 'anonymous'
+  // @kit:end
 
   it('every write leaves one audit row: actor, action, target, before / after, and the request trace id', async () => {
     const { api } = t.build()
@@ -138,9 +143,9 @@ describe('items — audit', () => {
 
     const rows = await auditRows()
     expect(rows.map((r) => [r.action, r.target, r.actor])).toEqual([
-      ['item.create', `item:${id}`, 'anonymous'],
-      ['item.update', `item:${id}`, 'anonymous'],
-      ['item.delete', `item:${id}`, 'anonymous'],
+      ['item.create', `item:${id}`, ACTOR],
+      ['item.update', `item:${id}`, ACTOR],
+      ['item.delete', `item:${id}`, ACTOR],
     ])
     expect(rows.map((r) => r.traceId)).toEqual([created.traceId, updated.traceId, deleted.traceId])
     expect(rows[0]!.before).toBeNull()

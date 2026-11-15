@@ -21,7 +21,9 @@ describe('openapi contract', () => {
   it('documents every v1 route with the standard envelopes and the error shape', () => {
     const doc = JSON.parse(buildContract())
     expect(doc.openapi).toBe('3.1.0')
-    expect(Object.keys(doc.paths).sort()).toEqual(['/api/v1/items', '/api/v1/items/{id}', '/health/live', '/health/ready', '/version'])
+    expect(Object.keys(doc.paths)).toEqual(expect.arrayContaining(['/api/v1/items', '/api/v1/items/{id}', '/health/live', '/health/ready', '/version']))
+    // every resource lives under /api/v1 — nothing but the system routes sits outside it
+    expect(Object.keys(doc.paths).filter((path) => !path.startsWith('/api/v1/')).sort()).toEqual(['/health/live', '/health/ready', '/version'])
     for (const [path, operations] of Object.entries<Record<string, any>>(doc.paths)) {
       for (const [method, operation] of Object.entries(operations)) {
         for (const [status, response] of Object.entries<any>(operation.responses)) {

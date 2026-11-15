@@ -28,6 +28,10 @@ export interface ApiOptions {
   /** Readiness checks (the db module adds: database reachable, schema version == code). */
   checks?: readonly HealthCheck[]
   build?: { commit?: string; builtAt?: string }
+  /** Runs around the request scope, before a trace id exists — the trace module's server span goes here. */
+  before?: readonly MiddlewareHandler[]
+  /** Runs inside the request scope, in front of every route including /health/* (security headers, CORS, limits). */
+  middleware?: readonly MiddlewareHandler[]
 }
 
 export type Api = OpenAPIHono
@@ -97,10 +101,12 @@ const VersionSchema = z
 const json = <T extends z.ZodType>(schema: T, description: string) => ({ description, content: { 'application/json': { schema } } })
 
 export function createApi(options: ApiOptions): Api {
-  const { name, version, logger, checks = [], build = {} } = options
+  const { name, version, logger, checks = [], build = {}, before = [], middleware = [] } = options
   const app = createRouter()
 
+  for (const handler of before) app.use(handler)
   app.use(requestScope(logger))
+  for (const handler of middleware) app.use(handler)
 
   app.notFound((c) => c.json(errorBody('NOT_FOUND', `No route for ${c.req.method} ${c.req.path}`, traceIdOf(c)), 404))
 

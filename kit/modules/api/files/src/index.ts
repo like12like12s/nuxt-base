@@ -6,6 +6,9 @@ import { describeConfig, loadConfig, type Config } from './config.js'
 import { connect } from './db/index.js'
 import { EnvError } from './kit/api/env.js'
 import { gracefulShutdown } from './kit/api/shutdown.js'
+// @kit:if auth
+import { AuthConfigError } from './kit/auth/proxy.js'
+// @kit:end
 
 let config: Config
 try {
@@ -18,7 +21,19 @@ try {
 
 const logger = appLogger(config)
 const database = connect(config, logger)
+// @kit:if auth
+let app: ReturnType<typeof createApp>
+try {
+  app = createApp(config, { database, logger })
+} catch (err) {
+  // A bad auth setting (AUTH_DEV_MODE in production, an unknown role in AUTH_ROLE_MAP) stops the boot and says why.
+  if (!(err instanceof AuthConfigError)) throw err
+  console.error(err.message)
+  process.exit(1)
+}
+// @kit:else
 const app = createApp(config, { database, logger })
+// @kit:end
 const server = serve({ fetch: app.fetch, port: config.PORT, hostname: config.HOST }, (info) => {
   logger.info('listening', { port: info.port, db: database.dialect, config: describeConfig(config) })
 })

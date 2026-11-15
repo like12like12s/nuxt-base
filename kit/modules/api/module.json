@@ -2,8 +2,14 @@
   "name": "api",
   "status": "ready",
   "description": "API standard: hono + zod-openapi, /api/v1, error shape with traceId, pagination, health live/ready, /version, openapi.json contract test, typed client (fullstack: useApi)",
-  "kinds": ["api", "fullstack"],
-  "requires": ["db", "testkit"],
+  "kinds": [
+    "api",
+    "fullstack"
+  ],
+  "requires": [
+    "db",
+    "testkit"
+  ],
   "contributes": {
     "api": {
       "package": {
@@ -15,16 +21,57 @@
         }
       },
       "env": [
-        { "key": "APP_COMMIT", "required": false, "secret": false, "example": "", "description": "Git commit of the running build, shown by GET /version" },
-        { "key": "APP_BUILT_AT", "required": false, "secret": false, "example": "", "description": "Build time (ISO-8601), shown by GET /version" }
+        {
+          "key": "APP_COMMIT",
+          "required": false,
+          "secret": false,
+          "example": "",
+          "description": "Git commit of the running build, shown by GET /version"
+        },
+        {
+          "key": "APP_BUILT_AT",
+          "required": false,
+          "secret": false,
+          "example": "",
+          "description": "Build time (ISO-8601), shown by GET /version"
+        }
       ],
-      "files": [{ "from": "files", "to": "" }],
+      "files": [
+        {
+          "from": "files",
+          "to": ""
+        },
+        {
+          "from": "variants/openapi.json",
+          "to": "openapi.json",
+          "when": {
+            "without": [
+              "auth"
+            ]
+          }
+        }
+      ],
       "locked": [
-        { "from": "runtime/api/app.ts", "to": "src/kit/api/app.ts" },
-        { "from": "runtime/api/errors.ts", "to": "src/kit/api/errors.ts" },
-        { "from": "runtime/api/health.ts", "to": "src/kit/api/health.ts" },
-        { "from": "runtime/api/kit-version.ts", "to": "src/kit/api/kit-version.ts" },
-        { "from": "runtime/api/pagination.ts", "to": "src/kit/api/pagination.ts" }
+        {
+          "from": "runtime/api/app.ts",
+          "to": "src/kit/api/app.ts"
+        },
+        {
+          "from": "runtime/api/errors.ts",
+          "to": "src/kit/api/errors.ts"
+        },
+        {
+          "from": "runtime/api/health.ts",
+          "to": "src/kit/api/health.ts"
+        },
+        {
+          "from": "runtime/api/kit-version.ts",
+          "to": "src/kit/api/kit-version.ts"
+        },
+        {
+          "from": "runtime/api/pagination.ts",
+          "to": "src/kit/api/pagination.ts"
+        }
       ],
       "usage": "usage.md"
     },
@@ -40,7 +87,21 @@
           "openapi-typescript": "^7.13.0"
         }
       },
-      "files": [{ "from": "files-ui", "to": "" }],
+      "files": [
+        {
+          "from": "files-ui",
+          "to": ""
+        },
+        {
+          "from": "variants/schema.d.ts",
+          "to": "app/api/schema.d.ts",
+          "when": {
+            "without": [
+              "auth"
+            ]
+          }
+        }
+      ],
       "usage": "usage-ui.md"
     }
   }

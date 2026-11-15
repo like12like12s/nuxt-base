@@ -19,10 +19,21 @@ const shape = {
   ...database,
   APP_COMMIT: z.string().optional(),
   APP_BUILT_AT: z.string().optional(),
+  // @kit:if auth
+  // Forward-auth headers are believed only with one of these two (see usage.md, "Auth"). Neither = service tokens only.
+  AUTH_PROXY_SECRET: z.string().min(16).optional(),
+  AUTH_TRUSTED_PROXIES: z.string().optional(),
+  AUTH_ROLE_MAP: z.string().optional(),
+  AUTH_DEV_MODE: z.enum(['0', '1']).default('0'),
+  // @kit:end
 }
 
 /** Keys that hold secrets: masked in logs, no detail in config errors. DATABASE_URL may carry a password. */
+// @kit:if auth
+export const SECRETS: readonly (keyof typeof shape)[] = ['DATABASE_URL', 'AUTH_PROXY_SECRET']
+// @kit:else
 export const SECRETS: readonly (keyof typeof shape)[] = ['DATABASE_URL']
+// @kit:end
 
 export type Config = z.infer<z.ZodObject<typeof shape>>
 export type DatabaseConfig = z.infer<z.ZodObject<typeof database>>

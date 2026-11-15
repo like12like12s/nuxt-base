@@ -2,7 +2,25 @@
 // Nitro route /api/_me turns them into a user). Disabled by default — enable in app.config:
 //   nuxtBase: { auth: { enabled: true, loginUrl: '/outpost.goauthentik.io/start?rd=/' } }
 // Apps with another scheme (internal token, own session) override by shipping their own app/composables/useAuth.ts.
-export interface AuthUser { id: string; name: string; email?: string; groups?: string[] }
+export interface AuthUser { id: string; name: string; email?: string; groups?: string[]; roles?: string[] }
+
+// Two shapes are understood: the layer's own /api/_me ({ id, name, email?, groups? }) and an API that answers in the
+// kit's envelope with its own vocabulary — GET /api/v1/me -> { data: { subject, name, email, roles } }.
+export function toAuthUser(body: unknown): AuthUser | null {
+  const raw = body && typeof body === 'object' && 'data' in body ? (body as { data: unknown }).data : body
+  if (!raw || typeof raw !== 'object') return null
+  const u = raw as Record<string, unknown>
+  const id = typeof u.id === 'string' && u.id ? u.id : typeof u.subject === 'string' ? u.subject : ''
+  if (!id) return null
+  const list = (value: unknown) => (Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : undefined)
+  return {
+    id,
+    name: typeof u.name === 'string' && u.name ? u.name : id,
+    ...(typeof u.email === 'string' && u.email ? { email: u.email } : {}),
+    ...(list(u.groups) ? { groups: list(u.groups) } : {}),
+    ...(list(u.roles) ? { roles: list(u.roles) } : {}),
+  }
+}
 
 export function useAuth() {
   const cfg = useAppConfig().nuxtBase.auth
@@ -14,8 +32,7 @@ export function useAuth() {
   async function load() {
     if (!cfg.enabled) return
     try {
-      const res = await $fetch<AuthUser | null>(cfg.meEndpoint, { headers: { accept: 'application/json' } })
-      user.value = res && res.id ? res : null
+      user.value = toAuthUser(await $fetch<unknown>(cfg.meEndpoint, { headers: { accept: 'application/json' } }))
       error.value = ''
     } catch (e: any) {
       user.value = null
