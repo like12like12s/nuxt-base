@@ -1,10 +1,18 @@
 {
   "name": "og",
-  "status": "planned",
-  "description": "OG / Twitter meta per URL",
-  "kinds": [
-    "nuxt-app",
-    "fullstack"
-  ],
-  "requires": []
+  "status": "ready",
+  "description": "Per-URL Open Graph / Twitter meta for link previews: the SPA shell's <head> is rewritten for crawlers by the server (Node and Cloudflare Pages alike)",
+  "kinds": ["nuxt-app", "fullstack"],
+  "requires": [],
+  "contributes": {
+    "ui": {
+      "env": [
+        { "key": "NUXT_PUBLIC_SITE_URL", "required": false, "secret": false, "example": "", "description": "Public origin of the site (https://app.example.com) used in og:url / og:image; empty = taken from the request" }
+      ],
+      "files": [{ "from": "files", "to": "" }],
+      "locked": [{ "from": "runtime/og/og.ts", "to": "server/kit/og.ts" }],
+      "nuxtConfig": ["runtimeConfig: { public: { siteUrl: '' } },"],
+      "usage": "usage.md"
+    }
+  }
 }
