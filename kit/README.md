@@ -26,7 +26,8 @@ node <KIT>/bin/scaffold.mjs list [--json]              kinds, modules, deploy pr
 exit  meaning
 0     ok
 1     drift — `check` only: a locked file was edited / is missing / is behind the kit, or the layer tag is behind
-2     usage — bad flag or name, missing --kind / --dir, not a scaffolded project (check / update / add)
+2     usage — bad flag or name, missing --kind / --dir, not a scaffolded project (check / update / add),
+      `add`: a `kit:anchor` comment the generator needs was removed (code `anchor_missing`; nothing is written)
 3     the target dir exists and is not empty (`new`) · a generator's output file already exists (`add`)
 4     unknown or incompatible kind, module (also: planned) or preset · no generator for that type in the project
 70    internal error (a kit or generator bug). Deliberately not 1, so a crash never reads as drift.
@@ -40,7 +41,8 @@ new     { ok, dir, name, kind, modules[], db, deploy, kitVersion, files[], locke
           services[{ id, name, type: "web"|"api", port, healthPath }], env[{ key, required, secret }],
           backup[{ id, service, engine: "sqlite"|"mysql", envKey, path? | database? }], next[] }
           (+ "dryRun": true with --dry-run — same plan, nothing written)
-add     { ok, dir, type, name, generator, files[], next[] }
+add     { ok, dir, type, name, generator, files[], patched[], next[] }
+          (files = created, patched = existing app-owned files edited at a `kit:anchor` comment)
 check   { ok, dir, clean, kit: { project, current }, layer: { current, latest, behind } | null,
           drift[{ path, reason: "modified"|"missing"|"outdated"|"new-in-kit"|"removed-from-kit" }] }
 update  { ok, dir, kit: { from, to }, updated[], orphaned[], layer: { from, to, file } | null, warnings[] }
@@ -60,9 +62,11 @@ list    { ok, kitVersion, layerRef, kinds[{ name, description, parts[{ type, dir
   `{ "title", "description", "layerRef", "deploy": { "registry", "host", "domain", "user" }, "otlpEndpoint", "authentikUrl", "mysqlHost" }`.
   `layerRef` defaults to `github:like12like12s/nuxt-base#v<kitVersion>`; `deploy.registry` is the registry the deploy
   host pulls from; `mysqlHost` is the host in the example `DATABASE_URL` of a `--db mysql` project (never a
-  credential). Keys a module does not use are ignored.
+  credential); `otlpEndpoint` is the example `OTEL_EXPORTER_OTLP_ENDPOINT` of the `trace` module (empty = tracing
+  off); `authentikUrl` is named in the operator instructions of the `auth` module. Keys a module does not use are
+  ignored.
 - `.scaffold.json` (in every generated project):
-  `{ "kit", "kind", "modules", "db", "deploy", "layerRef", "answers": { name, title, description, port, apiPort, deploy, mysqlHost? }, "locked": { "<path>": "<sha256>" } }`.
+  `{ "kit", "kind", "modules", "db", "deploy", "layerRef", "answers": { name, title, description, port, apiPort, deploy, mysqlHost?, otlpEndpoint?, authentikUrl? }, "locked": { "<path>": "<sha256>" } }`.
   `answers` is everything needed to re-compose the project, which is how `check` / `update` / `add` work.
 
 ### check / update
@@ -79,6 +83,10 @@ layer.behind      the project's layer tag is older than the kit's (only for gith
                   a local path or a newer tag is left alone)
 ```
 
+`layer.current` is the tag the UI's `nuxt.config.ts` really extends (the oldest one when it names several);
+`.scaffold.json` is only consulted when the config names no tag of the layer. A tag edited by hand to an older one is
+therefore drift even though the manifest still records the new one.
+
 `update` writes the current locked files, replaces the old layer ref with the new one in the UI's `nuxt.config.ts`, and
 rewrites `.scaffold.json`. It never touches an app-owned file and never deletes: a file the kit dropped is reported as
 `orphaned` and left in place; a layer ref it cannot find in `nuxt.config.ts` is a warning, and `check` keeps failing.
@@ -90,11 +98,13 @@ It does not change `package.json` — dependency bumps stay a deliberate, review
 bin/scaffold.mjs        the CLI (argument parsing, output, exit codes)
 lib/                    kit.mjs (load the tree) · compose.mjs (selection -> files) · commands.mjs · render / pkg / fsutil / errors
 kinds/<name>/           kind.json + files/           nuxt-app · api · fullstack
-modules/<name>/         module.json (+ files/, generators/)   base (always) · ci-github · api · db · testkit
-                        planned: auth trace og security jobs notify
+modules/<name>/         module.json (+ files/, variants/, generators/)   base (always) · ci-github · api · db · testkit ·
+                        auth · trace · security · og · jobs · notify
+playbooks/              add-resource.md · add-page.md · add-job.md — copied into projects (.memory/docs/guides/playbook-*.md)
 presets/deploy/<name>/  preset.json + files/         cf-pages · container · pm2
 runtime/                files copied byte for byte into apps and locked: runtime/<area>/* -> src/kit/<area>/*
-                        (api · db · testing; testing/e2e.ts -> the UI's tests/kit/), project/gate-ci.mjs -> scripts/
+                        (api · db · auth · trace · security · jobs · notify · testing; testing/e2e.ts -> the UI's
+                        tests/kit/, og/og.ts -> the UI's server/kit/), project/gate-ci.mjs -> scripts/
 tests/                  *.spec.ts (unit, in `npm run gate`) · kit-gate.mjs + combos.mjs (`npm run gate:kit`)
 ```
 
@@ -110,7 +120,8 @@ A kind, a module and a deploy preset are all **units** with the same descriptor.
   "description": "one line, shown by `list`",
   "status": "ready",                       // modules: "ready" | "planned" (planned = listed, refused by `new` with exit 4)
   "kinds": ["api", "fullstack"],           // modules and presets: the kinds they support (anything else = exit 4)
-  "requires": ["db"],                      // modules: pulled in automatically, transitively
+  "requires": ["db"],                      // modules: pulled in automatically, transitively. An entry may be
+                                           // { "name": "db", "kinds": ["api", "fullstack"] } = only for those kinds
   "parts": [{ "type": "api", "dir": "api", "kind": "api" }],   // kinds only; "kind" borrows that kind's part contribution
   "contributes": {
     "api": {
@@ -140,6 +151,12 @@ Rules that keep the output deterministic — **same inputs, byte-identical outpu
   apiDir uiDir dir registry deployHost deployDomain deployUser mysqlHost dbName databaseUrlExample services nuxtConfig
   usageSections`. Use the `*Json` forms inside source code — they are quoted and escaped.
 - No clock, no randomness, no environment lookups in a template or in `lib/compose.mjs`.
+- Conditional blocks: a line that is only a comment `@kit:if <terms>` / `@kit:else` / `@kit:end` (`//`, `#` or
+  `<!-- -->` style) keeps or drops the lines in between; the directive lines never reach the project. Terms (all must
+  hold): a module name, `kind:<kind>`, `db:<db>`, `deploy:<preset>`, each optionally negated with `!`. Blocks nest.
+  This is how ONE app-owned file (`src/app.ts`, `src/config.ts`, a test helper) serves every module combination —
+  prefer it to a `when` variant whenever the file is text with comments. JSON files cannot hold a directive: they use
+  `when` variants (`modules/api/variants/openapi.json` without auth, `modules/auth/variants/openapi.json` with it).
 - Two units writing the same path is an error, not a merge. Variants use `when` on a `files` / `locked` / `symlinks` /
   `backup` entry — every key given must hold: `kind: [..]` (the project's kind is one of), `with: [..]` (all of these
   modules are selected), `without: [..]` (none of them is), `db: [..]` (the `--db` value is one of). That is how a
@@ -168,12 +185,35 @@ project sees it as `outdated` until `scaffold update`. `runtime/api/kit-version.
 ### Generators (`scaffold add`)
 
 A unit that is part of the project (its kind, or an installed module) may provide a generator per type. The module
-default-exports `({ name, type, dir, part, manifest, project }) => ({ files: [{ path, content }], next?: [] })`, sync or
-async, with paths relative to the part named in the descriptor (`"part": "ui" | "api"`, default the project root). The
-dispatcher refuses to overwrite an existing file (exit 3) or to write outside the project, and writes all files or
-none. When several units provide the same type the later one wins (modules override the kind). Shipped today: `page`
-(kind `nuxt-app`, also in `fullstack`); `resource` and `job` arrive with the playbooks task — until then a new
-resource is a copy of `src/resources/items/`.
+default-exports `({ name, type, dir, part, parts, manifest, project }) => ({ files, patches?, next? })`, sync or async:
+
+```
+files    [{ path, content, part? }]          new files; refused when one exists (exit 3)
+patches  [{ path, anchor, insert, part? }]   lines inserted into an existing app-owned file, above the line that holds
+                                             the comment `kit:anchor <anchor>`, with that line's indent. A missing
+                                             anchor is exit 2 (`anchor_missing`) and the message says what to add by hand
+next     ["…"]                               what the developer does next, in order
+```
+
+Paths are relative to the part named in the descriptor (`"part": "ui" | "api"`, default the project root); an entry
+may name another part (`part: 'ui' | 'api' | 'project'`), and is skipped when the project has no such part. Everything
+is computed before anything is written — all files and patches, or none; nothing outside the project. When several
+units provide the same type the later one wins (modules override the kind). A generator is pure like the rest of the
+kit: it runs no command, so derived files (`openapi.json`, the typed client) are regenerated by the commands in `next`.
+`lib/names.mjs` gives every spelling of a name (`order-lines` -> `OrderLine`, `order_lines`, …).
+
+```
+page       kind nuxt-app (also in fullstack)   app/pages/<name>.vue on the AsyncState pattern + tests/e2e/<name>.spec.ts
+resource   module api                           schemas, repository, routes (with auth declarations when the auth module
+                                                is installed), migration, tests; registered at the anchors in src/app.ts,
+                                                src/db/migrations/index.ts, src/db/schema.ts, tests/helpers.ts and the
+                                                matrix of tests/auth.spec.ts; fullstack: a list page + its e2e spec
+job        module jobs                          src/jobs/<name>.ts, its test, the registration in src/jobs/index.ts and
+                                                .memory/docs/guides/job-<name>.md (the scheduler entry for the operator)
+```
+
+Each has a playbook in `playbooks/` — the one command, what it generates, what to fill in, which tests must pass —
+written for an agent working inside the project, where it lands as `.memory/docs/guides/playbook-add-<type>.md`.
 
 ## Kinds
 
@@ -189,8 +229,8 @@ fullstack   api/ + ui/ in one repo, each with its own package.json and lockfile;
 ```
 
 Every kind gets `.gitignore` (first), `README.md`, `brief.md`, `.memory/docs/{context,guides,changelog}`,
-`.env.example` per part, `.scaffold.json`, and `npm run gate` / `gate:ci` at the root. `gate` is typecheck → unit
-tests (no lint step is generated yet — the gate contract allows only real parts). `gate:ci` (locked
+`.env.example` per part, `.scaffold.json`, and `npm run gate` / `gate:ci` at the root. `gate` is typecheck → lint
+(`oxlint --deny-warnings`, build output ignored through `.oxlintrc.json`) → unit tests. `gate:ci` (locked
 `scripts/gate-ci.mjs`) = gate + `gitleaks` (a visible `NOTICE … SKIPPED` when the binary is absent) +
 `npm audit --audit-level=high` in every directory that has a lockfile. `--with ci-github` adds a workflow running it.
 
@@ -225,9 +265,44 @@ testkit   deterministic factories (seeded random, fixed clock, sequential ids) �
           playwright helpers (captureErrors, stubApi) in the UI
 ```
 
-Seams left for the modules that follow (`auth`, `trace`): the request context has a `user` slot (`getContext().user`,
-read by `currentActor()` for the audit row) and the trace id comes from one function (`setTraceIdProvider()` lets an
-OpenTelemetry module supply the active span's id).
+## Modules: auth · trace · security · og · jobs · notify
+
+```
+auth      identity from three sources, in this order: the fixed dev user (AUTH_DEV_MODE=1 — createAuth() throws with
+          NODE_ENV=production, so the process does not start) · `Authorization: Bearer kit_…` service tokens (256
+          random bits, shown once, sha256 in `service_tokens`, roles, expiry, revoke, lastUsedAt, compared in constant
+          time; `npm run auth:token -- create|revoke|list`) · Authentik forward-auth headers, believed ONLY when the
+          request provably came through the proxy: the shared secret header `x-auth-proxy-secret` (AUTH_PROXY_SECRET)
+          and/or the TCP peer in AUTH_TRUSTED_PROXIES — neither configured = the headers are never believed.
+          Trusted users are upserted into `users` (written and audited on change only); roles are the app's own
+          (src/auth/roles.ts), mapped from identity-provider groups by AUTH_ROLE_MAP.
+          Every route declares who may call it — `publicRoute()` / `requireAuth()` / `requireRole(…)` as route
+          middleware. A route without a declaration is refused at run time (500, logged) and listed by
+          `undeclaredRoutes(app)`, which the generated tests/auth.spec.ts requires to be empty next to its
+          role x endpoint matrix (which must name every route). GET /api/v1/me returns the caller; in a UI the
+          layer's useAuth() reads it. kinds api / fullstack (brings api + db) and nuxt-app (UI wiring only).
+          Nothing here creates identity-provider or proxy configuration: usage.md tells the operator what to set up.
+trace     OpenTelemetry (sdk-trace 3.x) -> OTLP/HTTP. Off until OTEL_EXPORTER_OTLP_ENDPOINT is set. One SERVER span
+          per request from a hono middleware (`createApi({ before: [traceMiddleware()] })`) — nothing is patched, so
+          it is ESM-safe without a loader flag; src/tracing.ts is the first import of src/index.ts. The span's trace
+          id is the request's: x-trace-id, every log line, the audit row. Tests: an in-process fake collector
+          (src/kit/testing/otlp-collector.ts).
+security  `createApi({ middleware: security({…}) })`: secure headers (nosniff, DENY, no-referrer, HSTS, CSP none),
+          CORS allowlist of exact origins with credentials (a wildcard stops the boot), body limit (413), a fixed
+          window rate limit per TCP peer (429 + retry-after, /health/* exempt). Refusals use the error shape.
+og        per-URL title / description / og:* / twitter:* / canonical for crawlers: the SPA shell's <head> is rewritten
+          in the server's HTML renderer (Nitro `render:html`), the same code on Node and on Cloudflare Pages. The
+          app owns server/og.ts (URL -> meta, may be async, abandoned after 3 s, an error never breaks the page).
+jobs      src/jobs/<name>.ts + `npm run job -- <name>` / `node dist/jobs/run.js <name>`: a lock file per job (no
+          overlap; a dead owner or a passed deadline frees it), exit 0 ok · 1 failed · 2 unknown · 3 already running ·
+          4 timed out, one JSON line at start and end, audit actor `job:<name>` and no audit row without a change.
+          Nothing is scheduled: `add job` writes the scheduler entry for the operator.
+notify    client of a notification hub (`POST <NOTIFIER_URL>/notify`, bearer token): off without a URL, never throws,
+          5 s timeout. Tests mock fetch.
+```
+
+`createApi()` has two middleware slots for them: `before` (wraps the request scope — tracing) and `middleware` (inside
+it, in front of every route including the system ones — security). The auth middleware is mounted on `/api/v1/*`.
 
 ## Deploy presets
 
@@ -248,7 +323,8 @@ A preset on a kind it does not support (`cf-pages` on `api` / `fullstack`) is ex
 ## Testing the kit
 
 ```bash
-npm run gate        # fast: the generator's unit tests run inside the repo's vitest suite (kit/tests/*.spec.ts) — no installs
+npm run gate        # fast: lint of kit/{runtime,lib,bin} + the kit's unit tests in the repo's vitest suite — no installs
+npm run gate:ci     # gate + gitleaks + npm audit — what .github/workflows/gate.yml runs (the ci-github template, dogfooded)
 npm run gate:kit    # slow: every combo in tests/combos.mjs -> temp dir -> npm install -> npm run gate -> build -> run it
 node kit/tests/kit-gate.mjs --only fullstack --keep     # one family, keep the temp dirs
 ```
@@ -277,3 +353,31 @@ backup rule of `migrate`; in the image, the compose `db-check` gate (schema behi
 throwaway `mysql:8.4` container, else prints `NOTICE … SKIPPED`; the `--db mysql` combo runs its whole suite and its
 CLI there (in a `test_gate_*` schema that is dropped again), and the job `kit-runtime@mysql` runs the kit's
 data-layer unit tests there.
+
+Task E combos: `fullstack+full` and `api+full+container` scaffold every module, then prove on the built app with
+NODE_ENV=production: dev mode and a wildcard CORS origin stop the boot; anonymous = 401; forward-auth headers without
+the proxy secret = 401; a user through the proxy gets the mapped roles; a role matrix over HTTP; a service token
+created with the built CLI works and is 401 after `revoke`; secure headers, the CORS allowlist and the body limit;
+a span reaches a collector with the trace id of the response and of the log line. Then they run the three playbook
+generators (`add resource`, `add job`, `add page`), show that the contract test is red until `npm run contract`,
+and require `npm run gate` + `npm run build` green, the generated resource and job working on the built app, and the
+UI e2e suite (generated pages, link previews with crawler user agents) green. `nuxt-app+og+auth+cf-pages` runs the
+e2e suite against wrangler's Pages runtime. `kit-runtime@mysql` also runs the auth runtime tests on MySQL.
+
+## Releasing the kit (= the layer)
+
+One git tag versions the layer and the kit. A release changes what `scaffold check` reports in every project (locked
+files become `outdated`, the layer tag `behind`), so it is a deliberate step:
+
+1. Green on the commit to release: `npm run gate` and `npm run gate:kit`.
+2. Bump the version in **both** places, to the same value: `package.json` (`version`) and the locked
+   `kit/runtime/api/kit-version.ts` (`KIT_VERSION` — what `GET /version` of every app reports). A unit test
+   (`runtime-api.spec.ts`, "kit version") fails while they differ. Run `npm install` so `package-lock.json` follows.
+3. Commit (`release vX.Y.Z`), tag `vX.Y.Z` on that commit, push the branch and the tag. The tag must exist on GitHub
+   before any project is generated with it: a generated UI extends `github:like12like12s/nuxt-base#vX.Y.Z`.
+4. `npm run gate:kit` once more after the tag is pushed: the `layer: 'tag'` combos (container images) build against
+   the newest tag, so this is the run that proves the released layer and the released kit together.
+5. Consumers: `scaffold check` now reports drift in generated projects; `scaffold update` + their gate brings each one
+   up. Layer-only consumers bump the tag in their `extends`.
+
+Never move or re-use a tag. A wrong release is fixed by the next patch version.
