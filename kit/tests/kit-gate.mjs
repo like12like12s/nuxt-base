@@ -7,7 +7,7 @@
 // when docker is available, else a loud NOTICE … SKIPPED. The data-layer unit tests of the kit run there too.
 // Slow by design (installs, builds); the fast unit tests of the generator live in kit/tests/*.spec.ts (`npm run gate`).
 //
-//   node kit/tests/kit-gate.mjs [--only <text>] [--concurrency N] [--keep] [--no-docker] [--no-e2e] [--no-audit] [--layer-ref <ref>] [--list]
+//   node kit/tests/kit-gate.mjs [--only <text>] [--concurrency N] [--keep] [--no-docker] [--no-e2e] [--no-audit] [--port-base N] [--layer-ref <ref>] [--list]
 //
 // Re-runnable: every run uses new temp dirs and removes them (and any image / container it created) on exit, also
 // after a failure or Ctrl-C. `--keep` leaves the dirs for inspection. Starts nothing outside its own child processes.
@@ -26,7 +26,7 @@ const BIN = join(KIT, 'bin', 'scaffold.mjs')
 const { values: flags } = parseArgs({
   options: {
     only: { type: 'string' }, concurrency: { type: 'string' }, keep: { type: 'boolean' }, 'no-docker': { type: 'boolean' },
-    'no-e2e': { type: 'boolean' }, 'no-audit': { type: 'boolean' }, 'layer-ref': { type: 'string' }, list: { type: 'boolean' },
+    'no-e2e': { type: 'boolean' }, 'no-audit': { type: 'boolean' }, 'port-base': { type: 'string' }, 'layer-ref': { type: 'string' }, list: { type: 'boolean' },
   },
 })
 
@@ -46,6 +46,11 @@ const docker = !flags['no-docker'] && spawnSync('docker', ['info'], { stdio: 'ig
 const latestTag = spawnSync('git', ['-C', REPO, 'describe', '--tags', '--abbrev=0'], { encoding: 'utf8' }).stdout.trim()
 const tagRef = flags['layer-ref'] ?? (latestTag ? `github:like12like12s/nuxt-base#${latestTag}` : null)
 const localRef = flags['layer-ref'] ?? REPO
+
+// Ports: every combo gets a block of 10 above a base that differs per run (derived from the pid), so two gate runs on
+// one machine — two checkouts, two sessions — do not answer each other's probes. --port-base pins it.
+const PORT_BASE = Number(flags['port-base']) || 30000 + (process.pid % 140) * 250
+if (!Number.isInteger(PORT_BASE) || PORT_BASE < 1024 || PORT_BASE > 65000) { console.error('kit gate: --port-base must be a port between 1024 and 65000'); process.exit(2) }
 
 const dirs = new Set()
 const schemas = new Set() // `test_gate_*` schemas created on the MySQL server — dropped after each combo and on exit
@@ -204,7 +209,7 @@ async function gateCombo(combo, index) {
   const dir = join(tmp, 'app')
   const log = join(tmp, 'gate.log')
   writeFileSync(log, `kit gate — ${combo.id}\n`)
-  const port = 39300 + index * 10
+  const port = PORT_BASE + index * 10
   const started = Date.now()
   let step = 'scaffold'
   const steps = []
@@ -494,7 +499,7 @@ async function gateCombo(combo, index) {
 
 mysqlUrl = await provideMysql()
 const concurrency = Math.max(1, Number(flags.concurrency) || Math.min(4, Math.floor(availableParallelism() / 2) || 1))
-console.log(`kit gate: ${selected.length} job(s), concurrency ${concurrency}, docker ${docker ? 'yes' : 'NO (image builds skipped)'}, mysql ${mysqlUrl ? (process.env.TEST_MYSQL_URL ? 'TEST_MYSQL_URL' : 'throwaway container') : selected.some((c) => c.runtime || c.db === 'mysql') ? 'NO (MySQL runs skipped)' : 'not needed'}, layer local=${localRef} tag=${tagRef}`)
+console.log(`kit gate: ${selected.length} job(s), concurrency ${concurrency}, ports ${PORT_BASE}+, docker ${docker ? 'yes' : 'NO (image builds skipped)'}, mysql ${mysqlUrl ? (process.env.TEST_MYSQL_URL ? 'TEST_MYSQL_URL' : 'throwaway container') : selected.some((c) => c.runtime || c.db === 'mysql') ? 'NO (MySQL runs skipped)' : 'not needed'}, layer local=${localRef} tag=${tagRef}`)
 const queue = selected.map((combo) => ({ combo, index: combo.runtime ? combos.length : combos.indexOf(combo) }))
 const results = []
 await Promise.all(Array.from({ length: concurrency }, async () => {
