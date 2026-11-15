@@ -3,8 +3,9 @@
 //
 // Migrations: one ordered set (name -> { up, down }) that runs on SQLite and MySQL, plus the question every deploy and
 // every readiness probe asks — "does the database have exactly the schema this build was written for?".
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { sql, type Kysely } from 'kysely'
 import { Migrator, NO_MIGRATIONS, type Migration, type MigrationResult } from 'kysely/migration'
 import { isMemory, type Database } from './connect.js'
@@ -90,16 +91,48 @@ export const describeSchema = (s: SchemaState): string =>
       ? `schema behind: ${s.pending.length} pending migration(s): ${s.pending.join(', ')}`
       : `schema ahead: the database has migration(s) this build does not know: ${s.unknown.join(', ')}`
 
+export class BackupError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause })
+    this.name = 'BackupError'
+  }
+}
+
+/** Open a SQLite file read-only and run `PRAGMA integrity_check`. Throws BackupError unless it answers `ok`. */
+export function verifySqliteFile(file: string): void {
+  let verdict: string
+  try {
+    const copy = new DatabaseSync(file, { readOnly: true })
+    try {
+      verdict = (copy.prepare('PRAGMA integrity_check').all() as { integrity_check?: string }[]).map((row) => row.integrity_check).join('; ')
+    } finally {
+      copy.close()
+    }
+  } catch (error) {
+    throw new BackupError(`backup verification failed: ${error instanceof Error ? error.message : String(error)}`, error)
+  }
+  if (verdict !== 'ok') throw new BackupError(`backup verification failed: ${verdict.slice(0, 200)}`)
+}
+
 /**
- * SQLite backup before a migration: checkpoint the WAL into the main file, then copy it next to the database
- * (<dir>/backups/<file>.<stamp>.bak). Returns the copy's path, or null when there is nothing to copy.
+ * SQLite backup before a migration: `VACUUM INTO` a new file next to the database (<dir>/backups/<file>.<stamp>.bak),
+ * then verify the copy with `PRAGMA integrity_check`. VACUUM INTO reads one consistent snapshot — main file plus WAL —
+ * so it is correct while other connections read or write (a file copy is not: a reader holds the WAL checkpoint back
+ * and the copy misses pages). Returns the copy's path, or null when there is nothing to copy. Throws BackupError when
+ * the copy cannot be written or does not verify — the caller must not migrate then. An existing file is never replaced.
  */
 export async function backupSqlite(database: Database<any>, stamp: string): Promise<string | null> {
   if (database.target.dialect !== 'sqlite' || isMemory(database.target) || !existsSync(database.target.file)) return null
-  await sql`PRAGMA wal_checkpoint(TRUNCATE)`.execute(database.db)
   const dir = join(dirname(database.target.file), 'backups')
-  mkdirSync(dir, { recursive: true })
-  const copy = join(dir, `${basename(database.target.file)}.${stamp.replace(/[^0-9A-Za-z]/g, '')}.bak`)
-  copyFileSync(database.target.file, copy)
+  const base = join(dir, `${basename(database.target.file)}.${stamp.replace(/[^0-9A-Za-z]/g, '')}`)
+  let copy = `${base}.bak`
+  try {
+    mkdirSync(dir, { recursive: true })
+    for (let n = 1; existsSync(copy); n++) copy = `${base}-${n}.bak`
+    await sql`VACUUM INTO ${sql.lit(copy)}`.execute(database.db)
+  } catch (error) {
+    throw new BackupError(`backup failed: ${error instanceof Error ? error.message : String(error)}`, error)
+  }
+  verifySqliteFile(copy)
   return copy
 }

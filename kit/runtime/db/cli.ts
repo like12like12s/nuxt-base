@@ -9,7 +9,8 @@
 //   check                        exit 0 when database == code, 1 otherwise
 //   predeploy                    what a deploy runs before the new API starts: `migrate up` when DB_MIGRATE_ON_DEPLOY=1,
 //                                then `check`
-// Backup before migrate: SQLite = a copy of the file in <dir>/backups/. MySQL = the command in DB_BACKUP_CMD (your
+// Backup before migrate: SQLite = a verified snapshot (VACUUM INTO + integrity_check) in <dir>/backups/; a backup
+// that cannot be taken or does not verify refuses the migration. MySQL = the command in DB_BACKUP_CMD (your
 // dump hook) must succeed; without one the migration is refused unless --no-backup / DB_MIGRATE_NO_BACKUP=1 says the
 // backup was taken some other way. A database that has never been migrated holds nothing to back up.
 // Exit codes: 0 ok · 1 failed / not in sync · 2 usage · 3 refused (no backup).
@@ -56,9 +57,14 @@ export async function runDbCli(argv: readonly string[], deps: DbCliDeps): Promis
       return true
     }
     if (database.dialect === 'sqlite') {
-      const copy = await backupSqlite(database, now())
-      out(copy ? `backup: ${copy}` : 'backup: nothing to copy (in-memory or new database)')
-      return true
+      try {
+        const copy = await backupSqlite(database, now())
+        out(copy ? `backup: ${copy} (verified)` : 'backup: nothing to copy (in-memory or new database)')
+        return true
+      } catch (error) {
+        out(`REFUSED: the backup before migrating failed — not migrating (${error instanceof Error ? error.message : String(error)})`)
+        return false
+      }
     }
     const hook = env.DB_BACKUP_CMD
     if (!hook) {

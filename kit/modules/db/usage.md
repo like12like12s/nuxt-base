@@ -19,7 +19,7 @@ npm run db:check                # exit 0 only when database == code (what /healt
 - Resilience: connect and statement deadlines (`DB_CONNECT_TIMEOUT_MS`, `DB_QUERY_TIMEOUT_MS`), `DB_RETRIES` extra
   attempts on transient errors only (deadlock, lock wait, connection refused; a lost connection is replayed for reads,
   not for writes). `withTransaction()` replays a whole transaction on a deadlock. The pool closes on SIGTERM.
-- Backup before migrate: SQLite — a copy in `data/backups/` (automatic). MySQL — set `DB_BACKUP_CMD` to your dump
+- Backup before migrate: SQLite — a verified snapshot in `data/backups/` (automatic; a backup that fails or does not verify stops the migration, exit 3). MySQL — set `DB_BACKUP_CMD` to your dump
   command; without it `db:migrate` refuses (exit 3) unless you pass `--no-backup` / `DB_MIGRATE_NO_BACKUP=1` because
   the backup was taken another way. Register the database with your backup job (`scaffold new --json` lists it under
   `backup`).

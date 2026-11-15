@@ -1,8 +1,9 @@
 // @vitest-environment node
 // The locked data layer (kit/runtime/db/**) at the source. Everything dialect-dependent runs on SQLite always and on
 // MySQL when TEST_MYSQL_URL points at a server where `test_*` schemas may be created (the kit gate provides one).
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { sql, type CompiledQuery, type DatabaseConnection, type Dialect, type Driver, type Kysely } from 'kysely'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { runWithContext } from '../runtime/api/context'
@@ -10,7 +11,7 @@ import { databaseChecks } from '../runtime/db/checks'
 import { runDbCli } from '../runtime/db/cli'
 import { newId, now, setClock, setIdGenerator } from '../runtime/db/clock'
 import { openDatabase, parseDatabaseUrl } from '../runtime/db/connect'
-import { appliedMigrations, migrateDown, migrateReset, migrateUp, schemaState, type Migrations } from '../runtime/db/migrate'
+import { appliedMigrations, backupSqlite, verifySqliteFile, migrateDown, migrateReset, migrateUp, schemaState, type Migrations } from '../runtime/db/migrate'
 import { DbTimeoutError } from '../runtime/db/mysql'
 import { audited, created, fromJson, softDeleted, toJson, touched, withTransaction, writeAudit } from '../runtime/db/repo'
 import { retryTransient, transientKind, type RetryEvent } from '../runtime/db/resilient'
@@ -456,6 +457,51 @@ describe('db commands', () => {
     expect(await run('migrate', 'up', '--no-backup')).toBe(0)
     expect(readdirSync(backups)).toHaveLength(1)
     for (const bad of [['nope'], ['migrate', 'sideways'], ['check', '--force'], []]) expect(await run(...bad)).toBe(2)
+  })
+
+  // H2 (review t1097): another connection holds a read snapshot (the running API, a job, the old container), so the
+  // WAL cannot be checkpointed — a plain file copy then misses pages or is malformed.
+  it('SQLite: the backup is a consistent, verified snapshot while another connection holds a read', async () => {
+    const database = await testDb({ dialect: 'sqlite', migrations })
+    const file = (database.target as { file: string }).file
+    const reader = new DatabaseSync(file)
+    try {
+      reader.exec('BEGIN')
+      reader.prepare('select count(*) from things').get()
+      for (let i = 0; i < 40; i++) await database.db.insertInto('things').values({ ...created(), name: `row ${i} ${'x'.repeat(400)}`, count: i }).execute()
+      const copy = (await backupSqlite(database, '2026-01-01T00:00:00.000Z'))!
+      expect(copy).toMatch(/backups\/.*\.20260101T000000000Z\.bak$/)
+      const backup = new DatabaseSync(copy, { readOnly: true })
+      try {
+        expect(backup.prepare('PRAGMA integrity_check').all()).toEqual([{ integrity_check: 'ok' }])
+        expect((backup.prepare('select count(*) as n from things').get() as { n: number }).n).toBe(40)
+      } finally { backup.close() }
+      // the same stamp twice never overwrites an earlier backup
+      const again = (await backupSqlite(database, '2026-01-01T00:00:00.000Z'))!
+      expect(again).not.toBe(copy)
+      expect(existsSync(copy) && existsSync(again)).toBe(true)
+    } finally {
+      reader.exec('ROLLBACK')
+      reader.close()
+    }
+  })
+
+  it('SQLite: a backup that cannot be taken or does not verify refuses the migration (exit 3, schema untouched)', async () => {
+    const database = await testDb({ dialect: 'sqlite', migrations: { '0001_base': baseMigration } })
+    const file = (database.target as { file: string }).file
+    writeFileSync(join(dirname(file), 'backups'), 'not a directory') // the backup cannot be written
+    const { run, lines } = cli(database)
+    expect(await run('migrate', 'up')).toBe(3)
+    expect(lines.at(-1)).toMatch(/^REFUSED: the backup before migrating failed/)
+    expect(await schemaState(database.db, migrations)).toMatchObject({ state: 'behind', pending: ['0002_things'] })
+    expect(await run('migrate', 'down')).toBe(3)
+    expect(await appliedMigrations(database.db)).toEqual(['0001_base'])
+
+    // a copy that is not a healthy database is rejected by the verification
+    const broken = join(dirname(file), 'broken.bak')
+    writeFileSync(broken, Buffer.concat([readFileSync(file).subarray(0, 100), Buffer.alloc(8192, 0x5a)]))
+    expect(() => verifySqliteFile(broken)).toThrow(/backup verification failed/)
+    expect(() => verifySqliteFile(file)).not.toThrow()
   })
 
   it('predeploy only checks — unless DB_MIGRATE_ON_DEPLOY=1, then it migrates first', async () => {
