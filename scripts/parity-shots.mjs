@@ -18,7 +18,12 @@ if (cmd === 'shoot') {
   mkdirSync(out, { recursive: true })
   const browser = await chromium.launch()
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: 'reduce' })
-  if (rewrite) { const [from, to] = rewrite.split('='); await ctx.route(`${from}/**`, (r) => r.continue({ url: r.request().url().replace(from, to) })) }
+  if (rewrite) { const [from, to] = rewrite.split('='); 
+    // fetch + fulfill (not continue): continue() cannot change protocol, and a local http build often needs an https API
+    await ctx.route(`${from}/**`, async (r) => {
+      try { await r.fulfill({ response: await r.fetch({ url: r.request().url().replace(from, to) }) }) } catch { await r.abort() }
+    })
+  }
   const page = await ctx.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(`pageerror ${e.message}`))
