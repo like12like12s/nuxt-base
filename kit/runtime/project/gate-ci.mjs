@@ -2,7 +2,8 @@
 // .scaffold.json; `scaffold check` reports local edits and `scaffold update` overwrites them.
 //
 // gate:ci = the local gate + secret scan (gitleaks) + dependency audit (npm audit --audit-level=high).
-// Fail-fast, non-interactive. A missing gitleaks binary is a visible notice, never a silent pass.
+// Fail-fast, non-interactive. A missing gitleaks binary is a visible notice on a developer machine and a FAILURE in CI
+// (CI set to anything but empty / 0 / false) — a pipeline that silently skips the secret scan is not a secret scan.
 import { spawnSync } from 'node:child_process'
 import { existsSync, lstatSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -20,7 +21,12 @@ let code = run('npm', ['run', 'gate'])
 if (code !== 0) fail('gate', code)
 
 step('gitleaks')
+const inCi = !['', '0', 'false'].includes((process.env.CI ?? '').toLowerCase())
 if (spawnSync('gitleaks', ['version'], { stdio: 'ignore' }).error) {
+  if (inCi) {
+    console.error('gitleaks is not installed and CI is set — the secret scan must run in CI (install the pinned release in the workflow: https://github.com/gitleaks/gitleaks)')
+    fail('gitleaks (not installed)', 1)
+  }
   console.log('NOTICE: gitleaks is not installed — secret scan SKIPPED (install it: https://github.com/gitleaks/gitleaks)')
 } else {
   const args = existsSync(join(root, '.git')) ? ['detect', '--source', '.', '--no-banner', '--redact'] : ['detect', '--source', '.', '--no-git', '--no-banner', '--redact']

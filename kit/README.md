@@ -44,7 +44,7 @@ new     { ok, dir, name, kind, modules[], db, deploy, kitVersion, files[], locke
 add     { ok, dir, type, name, generator, files[], patched[], next[] }
           (files = created, patched = existing app-owned files edited at a `kit:anchor` comment)
 check   { ok, dir, clean, kit: { project, current }, layer: { current, latest, behind } | null,
-          drift[{ path, reason: "modified"|"missing"|"outdated"|"new-in-kit"|"removed-from-kit" }] }
+          drift[{ path, reason: "modified"|"missing"|"outdated"|"new-in-kit"|"removed-from-kit" }], warnings[] }
 update  { ok, dir, kit: { from, to }, updated[], orphaned[], layer: { from, to, file } | null, warnings[] }
 list    { ok, kitVersion, layerRef, kinds[{ name, description, parts[{ type, dir }] }],
           modules[{ name, status: "ready"|"planned", implicit, kinds[], requires[], generators[], description }],
@@ -60,6 +60,12 @@ list    { ok, kitVersion, layerRef, kinds[{ name, description, parts[{ type, dir
   registers nothing — the wrapper does.
 - `--context ctx.json` — every key optional, obvious placeholders otherwise:
   `{ "title", "description", "layerRef", "deploy": { "registry", "host", "domain", "user" }, "otlpEndpoint", "authentikUrl", "mysqlHost" }`.
+  An empty value counts as not given. Every value is validated before anything is written (`new`: exit 2 otherwise): `title` / `description` are single lines
+  without control characters; `deploy.*` and `mysqlHost` are letters, digits and `. _ : -` (`registry` also `/`);
+  `layerRef` has no spaces or quotes; the two URLs are plain http(s) without credentials. The values are rendered
+  into source, YAML and a bash-sourced `deploy.conf`, so nothing that could become code is accepted.
+  Answers already stored in a project's `.scaffold.json` never fail `check` / `update` / `add`: a stored value that
+  is not acceptable is listed in `warnings[]` and the default is used in its place.
   `layerRef` defaults to `github:like12like12s/nuxt-base#v<kitVersion>`; `deploy.registry` is the registry the deploy
   host pulls from; `mysqlHost` is the host in the example `DATABASE_URL` of a `--db mysql` project (never a
   credential); `otlpEndpoint` is the example `OTEL_EXPORTER_OTLP_ENDPOINT` of the `trace` module (empty = tracing
@@ -229,10 +235,12 @@ fullstack   api/ + ui/ in one repo, each with its own package.json and lockfile;
 ```
 
 Every kind gets `.gitignore` (first), `README.md`, `brief.md`, `.memory/docs/{context,guides,changelog}`,
-`.env.example` per part, `.scaffold.json`, and `npm run gate` / `gate:ci` at the root. `gate` is typecheck → lint
+`.env.example` per part, `.scaffold.json`, and `npm run gate` / `gate:ci` at the root. The README and `next[]` say
+that the repository must stay private: the answers, `docker/` and the env examples record deployment details. `gate` is typecheck → lint
 (`oxlint --deny-warnings`, build output ignored through `.oxlintrc.json`) → unit tests. `gate:ci` (locked
-`scripts/gate-ci.mjs`) = gate + `gitleaks` (a visible `NOTICE … SKIPPED` when the binary is absent) +
-`npm audit --audit-level=high` in every directory that has a lockfile. `--with ci-github` adds a workflow running it.
+`scripts/gate-ci.mjs`) = gate + `gitleaks` (absent binary: a visible `NOTICE … SKIPPED` locally, a failure when `CI`
+is set) + `npm audit --audit-level=high` in every directory that has a lockfile. `--with ci-github` adds a workflow
+running it: `npm ci`, actions pinned by commit SHA, gitleaks installed from a pinned release with its checksum.
 
 ## Modules: api · db · testkit
 
@@ -312,7 +320,9 @@ container   multi-stage Dockerfile + .dockerignore per part (locked) · docker/d
             docker/env.example filled from --context (deploy.registry / host / domain / user). With the db module the
             compose file has a one-shot `db-check` service the API depends on (`node dist/db/cli.js predeploy`: migrate
             when DB_MIGRATE_ON_DEPLOY=1, then database == image or the API does not start). A one-part project gets a
-            symlinked service dir (`web -> .` / `api -> .`). The deploy script itself is NOT in the kit: it carries
+            symlinked service dir (`web -> .` / `api -> .`). No `container_name`: compose names containers
+            `<project>-<service>-1`, so two stages of one app run on one host (second stage: another directory with
+            `COMPOSE_PROJECT_NAME` and other ports in its `.env`). The deploy script itself is NOT in the kit: it carries
             site-specific defaults, so the wrapper (or the developer) copies it from the private docker-node template.
 pm2         ecosystem.config.cjs (time: true, ports in env only). Nothing is started: the generated usage.md documents
             starting it through the Pilot API.
@@ -349,7 +359,8 @@ For projects with the `db` module it also proves, on the built app: the committe
 `schema.d.ts`) are exactly what the code generates; `db check` fails and `/health/ready` is 503 until `migrate up`;
 seeding twice changes nothing; list / create / soft delete, the error shape and the trace id over real HTTP; the
 backup rule of `migrate`; in the image, the compose `db-check` gate (schema behind = `up` fails and no API runs,
-`DB_MIGRATE_ON_DEPLOY=1` = migrated and ready). MySQL: the gate uses `TEST_MYSQL_URL` when set, else starts a
+`DB_MIGRATE_ON_DEPLOY=1` = migrated and ready, and a second stage of the same compose file running next to it).
+MySQL: the gate uses `TEST_MYSQL_URL` when set, else starts a
 throwaway `mysql:8.4` container, else prints `NOTICE … SKIPPED`; the `--db mysql` combo runs its whole suite and its
 CLI there (in a `test_gate_*` schema that is dropped again), and the job `kit-runtime@mysql` runs the kit's
 data-layer unit tests there.

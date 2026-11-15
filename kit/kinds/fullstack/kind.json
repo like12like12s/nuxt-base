@@ -17,7 +17,7 @@
     "project": {
       "package": {
         "scripts": {
-          "postinstall": "npm install --prefix api && npm install --prefix ui",
+          "postinstall": "c=install; [ \"$npm_command\" = ci ] && c=ci; npm $c --prefix api && npm $c --prefix ui",
           "dev:api": "npm run dev --prefix api",
           "dev:ui": "npm run dev --prefix ui",
           "build": "npm run build --prefix api && npm run build --prefix ui",
