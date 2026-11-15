@@ -67,9 +67,9 @@ export const ${n.constant}_SORTABLE = ['createdAt', 'updatedAt', 'name'] as cons
 // audit row commit together), DELETE sets deletedAt.
 import type { Kysely } from 'kysely'
 import type { Schema } from '../../db/schema.js'
-import { notFound } from '../../kit/api/errors.js'
+import { conflict, notFound } from '../../kit/api/errors.js'
 import type { ListParams } from '../../kit/api/pagination.js'
-import { audited, created, softDeleted, touched } from '../../kit/db/repo.js'
+import { audited, created, isUniqueViolation, softDeleted, touched } from '../../kit/db/repo.js'
 import type { ${n.constant}_SORTABLE, ${n.onePascal}, ${n.onePascal}Create, ${n.onePascal}Update } from './${n.kebab}.schema.js'
 
 type Db = Kysely<Schema>
@@ -93,10 +93,19 @@ export async function get${n.onePascal}(db: Db, id: string): Promise<${n.onePasc
   return row
 }
 
+// Names are unique among live rows. The database enforces it (unique index on the generated \`liveName\` column, see
+// the migration) — a check-then-insert would let two concurrent requests both through. A duplicate is a 409.
+// Not unique in your domain? Remove the liveName column + index from the migration, the table type and this mapping.
+const duplicate = (error: unknown, name: string) => (isUniqueViolation(error) ? conflict(\`${n.oneTitle} "\${name}" already exists\`) : error)
+
 export function create${n.onePascal}(db: Db, input: ${n.onePascal}Create): Promise<${n.onePascal}> {
   return audited(db, { action: '${n.oneSnake}.create' }, async (trx) => {
     const row = { ...created(), name: input.name }
-    await trx.insertInto('${n.snake}').values(row).execute()
+    try {
+      await trx.insertInto('${n.snake}').values(row).execute()
+    } catch (error) {
+      throw duplicate(error, input.name)
+    }
     const after = await get${n.onePascal}(trx, row.id)
     return { result: after, target: target(after.id), after }
   })
@@ -108,7 +117,14 @@ export function update${n.onePascal}(db: Db, id: string, patch: ${n.onePascal}Up
     const changes = Object.fromEntries(Object.entries(patch).filter(([key, value]) => value !== undefined && value !== before[key as keyof ${n.onePascal}]))
     // Nothing differs: no write, and audited() records nothing because before equals after.
     if (!Object.keys(changes).length) return { result: before, before, after: before }
-    await trx.updateTable('${n.snake}').set({ ...changes, ...touched() }).where('id', '=', id).execute()
+    let updated
+    try {
+      // \`deletedAt is null\` again: the row may have been deleted since it was read (another request, MySQL).
+      updated = await trx.updateTable('${n.snake}').set({ ...changes, ...touched() }).where('id', '=', id).where('deletedAt', 'is', null).executeTakeFirst()
+    } catch (error) {
+      throw duplicate(error, patch.name ?? before.name)
+    }
+    if (!updated.numUpdatedRows) throw notFound('${n.oneTitle}', id)
     const after = await get${n.onePascal}(trx, id)
     return { result: after, before, after }
   })
@@ -117,7 +133,9 @@ export function update${n.onePascal}(db: Db, id: string, patch: ${n.onePascal}Up
 export function delete${n.onePascal}(db: Db, id: string): Promise<void> {
   return audited(db, { action: '${n.oneSnake}.delete', target: target(id) }, async (trx) => {
     const before = await get${n.onePascal}(trx, id)
-    await trx.updateTable('${n.snake}').set(softDeleted()).where('id', '=', id).execute()
+    // Only a live row is deleted: of two concurrent DELETEs one changes nothing, answers 404 and writes no audit row.
+    const deleted = await trx.updateTable('${n.snake}').set(softDeleted()).where('id', '=', id).where('deletedAt', 'is', null).executeTakeFirst()
+    if (!deleted.numUpdatedRows) throw notFound('${n.oneTitle}', id)
     return { result: undefined, before }
   })
 }
@@ -167,7 +185,7 @@ const createRoute_ = createRoute({
   tags,
   summary: 'Create a ${n.oneTitle.toLowerCase()}',
 ${declare("requireRole('admin', 'editor')")}  request: { body: { required: true, content: json(${n.onePascal}CreateSchema) } },
-  responses: { 201: { description: 'Created', content: json(dataOf(${n.onePascal}Schema)) }, ...errorResponses(${errors(400, 'write')}) },
+  responses: { 201: { description: 'Created', content: json(dataOf(${n.onePascal}Schema)) }, ...errorResponses(${errors(400, 409, 'write')}) },
 })
 
 const updateRoute = createRoute({
@@ -176,7 +194,7 @@ const updateRoute = createRoute({
   tags,
   summary: 'Update a ${n.oneTitle.toLowerCase()}',
 ${declare("requireRole('admin', 'editor')")}  request: { params: ${n.onePascal}IdParam, body: { required: true, content: json(${n.onePascal}UpdateSchema) } },
-  responses: { 200: { description: 'Updated', content: json(dataOf(${n.onePascal}Schema)) }, ...errorResponses(${errors(400, 404, 'write')}) },
+  responses: { 200: { description: 'Updated', content: json(dataOf(${n.onePascal}Schema)) }, ...errorResponses(${errors(400, 404, 409, 'write')}) },
 })
 
 const deleteRoute = createRoute({
@@ -212,15 +230,19 @@ export function register${n.pascal}(v1: OpenAPIHono, deps: { db: Kysely<Schema> 
 
   const migrationFile = `import type { Kysely } from 'kysely'
 import type { Migration } from 'kysely/migration'
-import { standardColumns } from '../../kit/db/schema.js'
+import { liveValue, standardColumns } from '../../kit/db/schema.js'
 
 // Portable column rules: header of src/kit/db/schema.ts. Never edit this file once it has shipped — add a new migration.
 export const ${n.camel}: Migration = {
   async up(db: Kysely<any>) {
     await standardColumns(db.schema.createTable('${n.snake}'))
       .addColumn('name', 'varchar(191)', (col) => col.notNull())
+      // The name while the row is live, NULL once it is soft-deleted: the unique index below is what makes "one live
+      // row per name" true under concurrent requests (src/kit/db/schema.ts, liveValue).
+      .addColumn('liveName', 'varchar(191)', (col) => col.generatedAlwaysAs(liveValue('name')))
       .execute()
     await db.schema.createIndex('${n.snake}_name_idx').on('${n.snake}').column('name').execute()
+    await db.schema.createIndex('${n.snake}_live_name_uq').on('${n.snake}').column('liveName').unique().execute()
   },
   async down(db: Kysely<any>) {
     await db.schema.dropTable('${n.snake}').execute()
@@ -271,6 +293,22 @@ describe('${n.kebab}', () => {
     expect(row.deletedAt).not.toBeNull()
   })
 
+  it('names are unique among live rows — enforced by the database, also under concurrent requests (409)', async () => {
+    const { api } = t.build()
+    const results = await Promise.all(Array.from({ length: 5 }, () => api.post(URL, { name: 'Only one' })))
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409, 409, 409, 409])
+    expect(results.find((r) => r.status === 409)!.body.error.code).toBe('CONFLICT')
+    const other = (await api.post(URL, { name: 'Other' })).body.data.id
+    expect((await api.patch(\`\${URL}/\${other}\`, { name: 'Only one' })).status).toBe(409)
+    // not a check in the application: a second live row with the name cannot be written at all
+    await expect(t.db.insertInto('${n.snake}').values({ id: 'direct', name: 'Only one', createdAt: 'x', updatedAt: 'x', deletedAt: null }).execute()).rejects.toThrow()
+    // a soft-deleted row does not hold its name; a deleted row is not written to
+    const winner = results.find((r) => r.status === 201)!.body.data.id
+    expect((await Promise.all([1, 2].map(() => api.delete(\`\${URL}/\${winner}\`)))).map((r) => r.status).sort()).toEqual([204, 404])
+    expect((await api.patch(\`\${URL}/\${winner}\`, { name: 'Late' })).status).toBe(404)
+    expect((await api.post(URL, { name: 'Only one' })).status).toBe(201)
+  })
+
   it('every write leaves one audit row; a write that changes nothing leaves none', async () => {
     const { api } = t.build()
     const created = await api.post(URL, { name: 'Audited' })
@@ -302,7 +340,7 @@ describe('${n.kebab}', () => {
     { path: 'src/app.ts', anchor: 'resources', insert: `register${n.pascal}(v1, { db: deps.database.db })` },
     { path: 'src/db/migrations/index.ts', anchor: 'migration-imports', insert: `import { ${n.camel} } from './${migration}.js'` },
     { path: 'src/db/migrations/index.ts', anchor: 'migrations', insert: `'${migration}': ${n.camel},` },
-    { path: 'src/db/schema.ts', anchor: 'tables', insert: `export interface ${n.pascal}Table extends StandardColumns {\n  name: string\n}\n\n` },
+    { path: 'src/db/schema.ts', anchor: 'tables', insert: `export interface ${n.pascal}Table extends StandardColumns {\n  name: string\n  /** Generated: \`name\` while live, NULL when soft-deleted — carries the unique index. Never written. */\n  liveName: import('kysely').GeneratedAlways<string | null>\n}\n\n` },
     { path: 'src/db/schema.ts', anchor: 'schema', insert: `${/^[a-z_]+$/.test(n.snake) ? n.snake : `'${n.snake}'`}: ${n.pascal}Table` },
     { path: 'tests/helpers.ts', anchor: 'test-cleanup', insert: `await t.db.deleteFrom('${n.snake}').execute()` },
   ]

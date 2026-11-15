@@ -6,7 +6,7 @@ import type { Kysely } from 'kysely'
 import type { Schema } from '../../db/schema.js'
 import { conflict, notFound } from '../../kit/api/errors.js'
 import type { ListParams } from '../../kit/api/pagination.js'
-import { audited, created, softDeleted, touched } from '../../kit/db/repo.js'
+import { audited, created, isUniqueViolation, softDeleted, touched } from '../../kit/db/repo.js'
 import type { ITEM_SORTABLE, Item, ItemCreate, ItemUpdate } from './items.schema.js'
 
 type Db = Kysely<Schema>
@@ -30,18 +30,18 @@ export async function getItem(db: Db, id: string): Promise<Item> {
   return row
 }
 
-/** Names are unique among live items. Checked inside the transaction of the write that needs it. */
-async function assertNameFree(db: Db, name: string, exceptId?: string): Promise<void> {
-  let query = db.selectFrom('items').select('id').where('name', '=', name).where('deletedAt', 'is', null)
-  if (exceptId) query = query.where('id', '!=', exceptId)
-  if (await query.executeTakeFirst()) throw conflict(`An item named "${name}" already exists`)
-}
+// Names are unique among live items. The database enforces it (unique index on the generated `liveName` column,
+// migration 0002) — a check-then-insert would let two concurrent requests both through. A duplicate is a 409.
+const duplicate = (error: unknown, name: string) => (isUniqueViolation(error) ? conflict(`An item named "${name}" already exists`) : error)
 
 export function createItem(db: Db, input: ItemCreate): Promise<Item> {
   return audited(db, { action: 'item.create' }, async (trx) => {
-    await assertNameFree(trx, input.name)
     const row = { ...created(), name: input.name, description: input.description ?? null, quantity: input.quantity ?? 0 }
-    await trx.insertInto('items').values(row).execute()
+    try {
+      await trx.insertInto('items').values(row).execute()
+    } catch (error) {
+      throw duplicate(error, input.name)
+    }
     const item = await getItem(trx, row.id)
     return { result: item, target: target(item.id), after: item }
   })
@@ -50,11 +50,17 @@ export function createItem(db: Db, input: ItemCreate): Promise<Item> {
 export function updateItem(db: Db, id: string, patch: ItemUpdate): Promise<Item> {
   return audited(db, { action: 'item.update', target: target(id) }, async (trx) => {
     const before = await getItem(trx, id)
-    if (patch.name !== undefined && patch.name !== before.name) await assertNameFree(trx, patch.name, id)
     const changes = Object.fromEntries(Object.entries(patch).filter(([key, value]) => value !== undefined && value !== before[key as keyof Item]))
     // Nothing differs: no write, and audited() records nothing because before equals after.
     if (!Object.keys(changes).length) return { result: before, before, after: before }
-    await trx.updateTable('items').set({ ...changes, ...touched() }).where('id', '=', id).execute()
+    let updated
+    try {
+      // `deletedAt is null` again: the row may have been deleted since it was read (another request, MySQL).
+      updated = await trx.updateTable('items').set({ ...changes, ...touched() }).where('id', '=', id).where('deletedAt', 'is', null).executeTakeFirst()
+    } catch (error) {
+      throw duplicate(error, patch.name ?? before.name)
+    }
+    if (!updated.numUpdatedRows) throw notFound('Item', id)
     const after = await getItem(trx, id)
     return { result: after, before, after }
   })
@@ -63,7 +69,9 @@ export function updateItem(db: Db, id: string, patch: ItemUpdate): Promise<Item>
 export function deleteItem(db: Db, id: string): Promise<void> {
   return audited(db, { action: 'item.delete', target: target(id) }, async (trx) => {
     const before = await getItem(trx, id)
-    await trx.updateTable('items').set(softDeleted()).where('id', '=', id).execute()
+    // Only a live row is deleted: of two concurrent DELETEs one changes nothing, answers 404 and writes no audit row.
+    const deleted = await trx.updateTable('items').set(softDeleted()).where('id', '=', id).where('deletedAt', 'is', null).executeTakeFirst()
+    if (!deleted.numUpdatedRows) throw notFound('Item', id)
     return { result: undefined, before }
   })
 }

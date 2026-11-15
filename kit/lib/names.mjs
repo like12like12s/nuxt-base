@@ -31,3 +31,23 @@ export function names(kebab) {
     constant: kebab.replaceAll('-', '_').toUpperCase(), // ORDER_LINES
   }
 }
+
+// Words a generated identifier must not be: `add job delete` would write `export const delete = …` (a syntax error),
+// `add resource errors` would declare `type Error` and shadow the built-in in every file that imports it.
+const RESERVED = new Set(
+  ('break case catch class const continue debugger default delete do else enum export extends false finally for function if import in instanceof ' +
+    'new null return super switch this throw true try typeof var void while with yield let static implements interface package private protected public ' +
+    'await arguments eval undefined nan infinity').split(' '),
+)
+const GLOBALS = new Set(
+  ('Object Array String Number Boolean Symbol BigInt Function Error Date Map Set WeakMap WeakSet Promise Proxy Reflect JSON Math RegExp Intl URL Request Response ' +
+    'Headers Blob File Event Record Partial Required Pick Omit Readonly Buffer Schema Kysely').split(' '),
+)
+
+/** Why `kebab` cannot name a generated page / resource / job, or null when it can. */
+export function reservedName(kebab) {
+  const n = names(kebab)
+  for (const word of [n.camel, n.oneCamel]) if (RESERVED.has(word.toLowerCase())) return `"${word}" is a reserved word in JavaScript / TypeScript`
+  for (const word of [n.pascal, n.onePascal]) if (GLOBALS.has(word)) return `"${word}" would shadow a built-in type`
+  return null
+}

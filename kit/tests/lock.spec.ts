@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { cleanup, cli, cloneKit, read, setKitVersion, snapshot, tmp } from './helpers'
@@ -204,5 +204,40 @@ describe('layer tag: nuxt.config.ts is what counts (t1088)', () => {
     expect(r.status).toBe(0)
     cli(['update', dir, '--json'], { kit })
     expect(JSON.parse(read(dir, '.scaffold.json')).layerRef).toBe(ref('1.1.0'))
+  })
+
+  // L11: inside() is lexical — a symlink in the project used to make `update` / `add` overwrite a file outside it
+  it('never writes through a symlink that leaves the project: update and add stop (exit 2), the outside file is untouched', () => {
+    const dir = project(['--kind', 'api', '--with', 'jobs'])
+    const outside = tmp('outside')
+    writeFileSync(join(outside, 'victim.ts'), 'do not touch\n')
+
+    // a locked file replaced by a link to a file elsewhere
+    rmSync(join(dir, 'src/kit/api/env.ts'))
+    symlinkSync(join(outside, 'victim.ts'), join(dir, 'src/kit/api/env.ts'))
+    const update = cli(['update', dir, '--json'])
+    expect(update.status).toBe(2)
+    expect(update.json).toMatchObject({ ok: false, code: 'path_escape' })
+    expect(readFileSync(join(outside, 'victim.ts'), 'utf8')).toBe('do not touch\n')
+    rmSync(join(dir, 'src/kit/api/env.ts'))
+    expect(cli(['update', dir, '--json']).status).toBe(0) // the link gone, update restores the real file
+
+    // a directory the generator writes into, linked out of the project
+    rmSync(join(dir, 'src/jobs'), { recursive: true })
+    mkdirSync(join(outside, 'jobs'))
+    writeFileSync(join(outside, 'jobs/index.ts'), '// kit:anchor job-imports\nexport const jobs = {\n  // kit:anchor jobs\n}\n')
+    symlinkSync(join(outside, 'jobs'), join(dir, 'src/jobs'))
+    const add = cli(['add', 'job', 'nightly', '--dir', dir, '--json'])
+    expect(add.status).toBe(2)
+    expect(add.json.code).toBe('path_escape')
+    expect(readdirSync(join(outside, 'jobs'))).toEqual(['index.ts'])
+    expect(readFileSync(join(outside, 'jobs/index.ts'), 'utf8')).not.toContain('nightly')
+  })
+
+  it('links that stay inside the project keep working (the `api -> .` service dir of a container project)', () => {
+    const dir = project(['--kind', 'api', '--deploy', 'container'])
+    appendFileSync(join(dir, 'src/kit/api/env.ts'), '\n// edited\n')
+    expect(cli(['update', dir, '--json']).json.updated).toEqual(['src/kit/api/env.ts'])
+    expect(cli(['check', dir, '--json']).status).toBe(0)
   })
 })

@@ -6,6 +6,7 @@ import { compose, composeFromManifest } from './compose.mjs'
 import { EXIT, existsError, incompatible, usageError } from './errors.mjs'
 import { inside, isEmptyOrMissing, pathExists, readJson, sha256, symlinkUnder, toJson, writeFileUnder } from './fsutil.mjs'
 import { GENERATOR_TYPES, LAYER_REPO, isBehind } from './kit.mjs'
+import { reservedName } from './names.mjs'
 
 const MANIFEST = '.scaffold.json'
 const NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/
@@ -163,6 +164,8 @@ export async function cmdAdd(kit, opts) {
   const { type, name } = opts
   if (!GENERATOR_TYPES.includes(type)) throw usageError(`add: unknown type "${type ?? ''}" (${GENERATOR_TYPES.join('|')})`)
   if (!name || !NAME.test(name)) throw usageError(`add ${type}: invalid name "${name ?? ''}" — lowercase kebab-case`)
+  const reserved = reservedName(name)
+  if (reserved) throw usageError(`add ${type}: "${name}" cannot be used as a name — ${reserved}. Pick a more specific one (e.g. ${name}-${type === 'job' ? 'job' : type === 'page' ? 'page' : 'records'}).`, 'reserved_name')
   const dir = resolve(opts.dir ?? '.')
   const manifest = readManifest(dir)
   const plan = composeFromManifest(kit, manifest)

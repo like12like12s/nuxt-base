@@ -49,7 +49,34 @@ describe('items — CRUD', () => {
     const { api } = t.build()
     const [a, b] = await createMany(api, 2)
     expect((await api.post('/api/v1/items', { name: a!.name })).status).toBe(409)
-    expect((await api.patch(`/api/v1/items/${b!.id}`, { name: a!.name })).status).toBe(409)
+    const renamed = await api.patch(`/api/v1/items/${b!.id}`, { name: a!.name })
+    expect(renamed.status).toBe(409)
+    expect(renamed.body.error).toMatchObject({ code: 'CONFLICT', message: `An item named "${a!.name}" already exists` })
+  })
+
+  it('the database enforces it: concurrent creates of one name end with one item, and a deleted name is free again', async () => {
+    const { api } = t.build()
+    const results = await Promise.all(Array.from({ length: 6 }, () => api.post('/api/v1/items', { name: 'Only one' })))
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409, 409, 409, 409, 409])
+    expect((await api.get('/api/v1/items')).body.meta.total).toBe(1)
+    expect(await t.db.selectFrom('audit').select('id').where('action', '=', 'item.create').execute()).toHaveLength(1)
+    // not a check in the application: a second live row with the name cannot be written at all
+    const row = { id: 'direct', name: 'Only one', description: null, quantity: 0, createdAt: 'x', updatedAt: 'x', deletedAt: null }
+    await expect(t.db.insertInto('items').values(row).execute()).rejects.toThrow()
+
+    const winner = results.find((r) => r.status === 201)!.body.data.id
+    expect((await api.delete(`/api/v1/items/${winner}`)).status).toBe(204)
+    expect((await api.post('/api/v1/items', { name: 'Only one' })).status).toBe(201) // the soft-deleted row does not hold the name
+  })
+
+  it('a row deleted in the meantime is not written to: concurrent deletes answer 204 once, and leave one audit row', async () => {
+    const { api } = t.build()
+    const [item] = await createMany(api, 1)
+    const statuses = (await Promise.all([1, 2, 3].map(() => api.delete(`/api/v1/items/${item!.id}`)))).map((r) => r.status).sort()
+    expect(statuses).toEqual([204, 404, 404])
+    expect(await t.db.selectFrom('audit').select('id').where('action', '=', 'item.delete').execute()).toHaveLength(1)
+    expect((await api.patch(`/api/v1/items/${item!.id}`, { quantity: 9 })).status).toBe(404)
+    expect((await t.db.selectFrom('items').select('quantity').where('id', '=', item!.id).executeTakeFirstOrThrow()).quantity).toBe(1)
   })
 })
 

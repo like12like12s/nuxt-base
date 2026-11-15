@@ -32,7 +32,10 @@ In a fullstack project it also writes `ui/app/pages/<name>.vue` (a list page on 
 2. With auth: who may call each route (`middleware: [requireAuth()]` / `requireRole(...)` / `publicRoute()` in
    `<name>.routes.ts`) and the matching rows in `tests/auth.spec.ts`. Generated default: read = any signed-in caller,
    write = `admin` / `editor`, delete = `admin`.
-3. Business rules in the repository (uniqueness, state changes) with a test for each.
+3. Business rules in the repository (state changes, further uniqueness) with a test for each. The generated resource
+   already keeps `name` unique among live rows — in the database (generated `liveName` column + unique index, see
+   `liveValue` in `src/kit/db/schema.ts`), answered as `409 CONFLICT`. Use the same pattern for any other unique
+   field; never check-then-insert. If names need not be unique, remove the column, the index and the 409 mapping.
 
 ## Then, in this order
 

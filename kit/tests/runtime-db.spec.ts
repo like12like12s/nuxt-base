@@ -4,7 +4,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { sql, type CompiledQuery, type DatabaseConnection, type Dialect, type Driver, type Kysely } from 'kysely'
+import { sql, type CompiledQuery, type DatabaseConnection, type Dialect, type Driver, type GeneratedAlways, type Kysely } from 'kysely'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { runWithContext } from '../runtime/api/context'
 import { databaseChecks } from '../runtime/db/checks'
@@ -13,12 +13,12 @@ import { newId, now, setClock, setIdGenerator } from '../runtime/db/clock'
 import { openDatabase, parseDatabaseUrl } from '../runtime/db/connect'
 import { appliedMigrations, backupSqlite, verifySqliteFile, migrateDown, migrateReset, migrateUp, schemaState, type Migrations } from '../runtime/db/migrate'
 import { DbTimeoutError } from '../runtime/db/mysql'
-import { audited, created, fromJson, softDeleted, toJson, touched, withTransaction, writeAudit } from '../runtime/db/repo'
+import { audited, created, fromJson, isUniqueViolation, softDeleted, toJson, touched, withTransaction, writeAudit } from '../runtime/db/repo'
 import { retryTransient, transientKind, type RetryEvent } from '../runtime/db/resilient'
-import { baseMigration, standardColumns, type BaseTables } from '../runtime/db/schema'
+import { baseMigration, liveValue, standardColumns, type BaseTables } from '../runtime/db/schema'
 import { createTestDb, mysqlSkipNotice, mysqlTestUrl, type TestDb } from '../runtime/testing/test-db'
 
-interface Things { id: string; name: string; count: number; createdAt: string; updatedAt: string; deletedAt: string | null }
+interface Things { id: string; name: string; count: number; createdAt: string; updatedAt: string; deletedAt: string | null; liveName: GeneratedAlways<string | null> }
 interface Schema extends BaseTables { things: Things }
 
 const migrations: Migrations = {
@@ -28,6 +28,7 @@ const migrations: Migrations = {
       await standardColumns(db.schema.createTable('things'))
         .addColumn('name', 'varchar(191)', (c) => c.notNull())
         .addColumn('count', 'integer', (c) => c.notNull().defaultTo(0))
+        .addColumn('liveName', 'varchar(191)', (c) => c.generatedAlwaysAs(liveValue('name')))
         .execute()
     },
     down: async (db) => { await db.schema.dropTable('things').execute() },
@@ -178,7 +179,8 @@ describe.each(DIALECTS)('migrations on %s', (dialect) => {
     expect(up.users).toEqual(['createdAt', 'deletedAt', 'email', 'id', 'name', 'roles', 'subject', 'updatedAt'])
     expect(up.audit).toEqual(['action', 'actor', 'after', 'before', 'id', 'target', 'traceId', 'ts'])
     expect(up.service_tokens).toEqual(['createdAt', 'deletedAt', 'expiresAt', 'hash', 'id', 'lastUsedAt', 'name', 'revokedAt', 'roles', 'updatedAt'])
-    expect(up.things).toEqual(['count', 'createdAt', 'deletedAt', 'id', 'name', 'updatedAt'])
+    // (SQLite's table_info does not list a generated column; MySQL does)
+    expect(up.things!.filter((c) => c !== 'liveName')).toEqual(['count', 'createdAt', 'deletedAt', 'id', 'name', 'updatedAt'])
 
     expect((await migrateDown(db, migrations)).map((r) => `${r.migrationName} ${r.direction}`)).toEqual(['0002_things Down'])
     expect(await schemaState(db, migrations)).toMatchObject({ state: 'behind', pending: ['0002_things'], current: '0001_base' })
@@ -254,6 +256,53 @@ describe.each(DIALECTS)('audit + soft delete on %s', (dialect) => {
     expect((await db.selectFrom('things').select('id').where('deletedAt', 'is', null).execute()).map((r) => r.id)).toEqual([b.id])
     const all = await db.selectFrom('things').select(['id', 'deletedAt']).orderBy('name').execute()
     expect(all.map((r) => r.deletedAt === null)).toEqual([false, true])
+  })
+})
+
+// M8 (review t1097): "unique among live rows" by check-then-insert lets two concurrent requests both through.
+// liveValue() + a UNIQUE index makes the database refuse the second one, on both engines.
+describe.each(DIALECTS)('unique among live rows on %s', (dialect) => {
+  const unique: Migrations = {
+    ...migrations,
+    '0003_things_unique': {
+      up: async (db) => { await db.schema.createIndex('things_live_name_uq').on('things').column('liveName').unique().execute() },
+      down: async (db) => { await (dialect === 'mysql' ? db.schema.dropIndex('things_live_name_uq').on('things') : db.schema.dropIndex('things_live_name_uq')).execute() },
+    },
+  }
+  const createThing = (db: Kysely<Schema>, name: string) =>
+    audited(db, { action: 'thing.create' }, async (trx) => {
+      const row = { ...created(), name, count: 0 }
+      await trx.insertInto('things').values(row).execute()
+      return { result: row.id, target: `thing:${row.id}`, after: row }
+    })
+
+  it('a second live row with the same value is refused as a unique violation; a soft-deleted row frees the value', async () => {
+    const { db } = await testDb({ dialect, migrations: unique })
+    const first = await createThing(db, 'taken')
+    const error = await createThing(db, 'taken').then(() => null, (e: unknown) => e)
+    expect(isUniqueViolation(error)).toBe(true)
+    expect(isUniqueViolation(new Error('boom'))).toBe(false)
+    expect(isUniqueViolation(DEADLOCK())).toBe(false)
+    expect(await db.selectFrom('audit').select('id').execute()).toHaveLength(1) // the refused write left no audit row
+    expect((await db.selectFrom('things').select(['name', 'liveName']).execute())).toEqual([{ name: 'taken', liveName: 'taken' }])
+
+    await db.updateTable('things').set(softDeleted()).where('id', '=', first).execute()
+    expect((await db.selectFrom('things').select('liveName').executeTakeFirstOrThrow()).liveName).toBeNull()
+    await createThing(db, 'taken') // the name is free again
+    await createThing(db, 'another')
+    // renaming a live row onto a taken name is refused too
+    expect(isUniqueViolation(await db.updateTable('things').set({ name: 'taken' }).where('name', '=', 'another').execute().then(() => null, (e: unknown) => e))).toBe(true)
+    // migrate down removes it again (reversible)
+    expect((await migrateDown(db, unique)).map((r) => r.migrationName)).toEqual(['0003_things_unique'])
+  })
+
+  it('concurrent creates of one value: exactly one is stored', async () => {
+    const { db } = await testDb({ dialect, migrations: unique, options: { poolMax: 8 } })
+    const results = await Promise.all(Array.from({ length: 8 }, () => createThing(db, 'race').then(() => 'ok', (e: unknown) => (isUniqueViolation(e) ? 'duplicate' : `other: ${(e as Error).message}`))))
+    expect(results.filter((r) => r === 'ok')).toHaveLength(1)
+    expect(results.filter((r) => r === 'duplicate')).toHaveLength(7)
+    expect(await db.selectFrom('things').select('id').execute()).toHaveLength(1)
+    expect(await db.selectFrom('audit').select('id').execute()).toHaveLength(1)
   })
 })
 

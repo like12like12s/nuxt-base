@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { usageError } from './errors.mjs'
 
@@ -41,18 +41,38 @@ export function inside(root, rel) {
   return abs
 }
 
+// inside() is lexical. A symlink INSIDE the project can still point out of it (`src/kit -> /somewhere/else`, or a
+// locked file replaced by a link): writing "under the project" would then overwrite a file outside it. So before any
+// write, the real location of the deepest existing part of the path must be inside the real project root. Links that
+// stay inside (the `api -> .` / `web -> .` service dirs of a single-app container project) are fine.
+function assertRealInside(root, abs, rel) {
+  mkdirSync(root, { recursive: true })
+  const realRoot = realpathSync(root)
+  let probe = abs
+  while (!pathExists(probe)) probe = dirname(probe)
+  let real
+  try {
+    real = realpathSync(probe)
+  } catch {
+    throw usageError(`refusing to write through a dangling symlink: ${rel}`, 'path_escape')
+  }
+  if (real !== realRoot && !real.startsWith(realRoot + sep)) throw usageError(`refusing to write through a symlink that leaves the project: ${rel} -> ${real}`, 'path_escape')
+}
+
 export function writeFileUnder(root, rel, content, mode) {
   const abs = inside(root, rel)
+  assertRealInside(root, abs, rel)
   mkdirSync(dirname(abs), { recursive: true })
   writeFileSync(abs, content, mode ? { mode } : undefined)
 }
 
 export function symlinkUnder(root, rel, target) {
   const abs = inside(root, rel)
+  assertRealInside(root, dirname(abs), rel)
   mkdirSync(dirname(abs), { recursive: true })
   symlinkSync(target, abs)
 }
 
-export const pathExists = (p) => {
+export function pathExists(p) {
   try { lstatSync(p); return true } catch { return false }
 }

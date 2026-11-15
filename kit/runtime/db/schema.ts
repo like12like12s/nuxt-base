@@ -7,7 +7,7 @@
 //   timestamps   varchar(24)  — ISO-8601 UTC strings (now()); identical on both engines, sortable as text
 //   json         text         — JSON.stringify / JSON.parse in the repository (toJson / fromJson)
 //   strings      varchar(n) with n <= 191 when indexed (MySQL utf8mb4 index limit)
-import type { CreateTableBuilder, Kysely } from 'kysely'
+import { sql, type CreateTableBuilder, type Kysely, type RawBuilder } from 'kysely'
 import type { Migration } from 'kysely/migration'
 
 /** id, createdAt, updatedAt, deletedAt — on every table that holds business data. */
@@ -18,6 +18,17 @@ export function standardColumns<T extends string, C extends string = never>(tabl
     .addColumn('updatedAt', 'varchar(24)', (col) => col.notNull())
     .addColumn('deletedAt', 'varchar(24)')
 }
+
+/**
+ * "Unique among live rows" enforced by the database: a generated column that holds the value while the row is live
+ * and NULL once it is soft-deleted (a UNIQUE index allows many NULLs, on SQLite and on MySQL). In the migration:
+ *   .addColumn('liveName', 'varchar(191)', (col) => col.generatedAlwaysAs(liveValue('name')))
+ *   await db.schema.createIndex('things_live_name_uq').on('things').column('liveName').unique().execute()
+ * Table type: `liveName: GeneratedAlways<string | null>`. Nothing writes the column — an insert, a rename and a soft
+ * delete keep it right by themselves — and the repository maps the duplicate-key error to 409 (isUniqueViolation in
+ * repo.ts). A check-then-insert cannot do this: two concurrent requests both pass the check.
+ */
+export const liveValue = (column: string): RawBuilder<string | null> => sql<string | null>`case when ${sql.ref('deletedAt')} is null then ${sql.ref(column)} end`
 
 export interface StandardColumns {
   id: string

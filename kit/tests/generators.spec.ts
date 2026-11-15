@@ -50,7 +50,7 @@ describe('add resource', () => {
     expect(app).toContain('    registerOrderLines(v1, { db: deps.database.db })\n    // kit:anchor resources')
     expect(read(dir, 'api/src/db/migrations/index.ts')).toContain("  '0003_order_lines': orderLines,\n  // kit:anchor migrations")
     expect(read(dir, 'api/src/db/migrations/index.ts')).toContain("import { orderLines } from './0003_order_lines.js'\n// kit:anchor migration-imports")
-    expect(read(dir, 'api/src/db/schema.ts')).toContain('export interface OrderLinesTable extends StandardColumns {\n  name: string\n}\n\n// kit:anchor tables')
+    expect(read(dir, 'api/src/db/schema.ts')).toMatch(/export interface OrderLinesTable extends StandardColumns \{\n  name: string\n  \/\*\* Generated: .*\n  liveName: import\('kysely'\)\.GeneratedAlways<string \| null>\n\}\n\n\/\/ kit:anchor tables/)
     expect(read(dir, 'api/src/db/schema.ts')).toContain('  order_lines: OrderLinesTable\n  // kit:anchor schema')
     expect(read(dir, 'api/tests/helpers.ts')).toContain("    await t.db.deleteFrom('order_lines').execute()\n    // kit:anchor test-cleanup")
 
@@ -84,6 +84,43 @@ describe('add resource', () => {
     expect(second.json.patched).toEqual(['src/app.ts', 'src/db/migrations/index.ts', 'src/db/schema.ts', 'tests/helpers.ts'])
     expect(read(dir, 'src/db/migrations/index.ts')).toContain("  '0003_orders': orders,\n  '0004_categories': categories,\n  // kit:anchor migrations")
     expect(read(dir, 'src/resources/categories/categories.schema.ts')).toContain('export const CategorySchema = z')
+  })
+
+  // M8: the generated resource enforces "one live row per name" in the database and answers 409; L6: guarded writes
+  it('the generated resource has the live-unique column + index, maps a duplicate key to 409 and never writes to a deleted row', () => {
+    const dir = project(['--kind', 'api', '--with', 'api'])
+    expect(add(dir, 'resource', 'order-lines').status).toBe(0)
+    const migration = read(dir, 'src/db/migrations/0003_order_lines.ts')
+    expect(migration).toContain(".addColumn('liveName', 'varchar(191)', (col) => col.generatedAlwaysAs(liveValue('name')))")
+    expect(migration).toContain("createIndex('order_lines_live_name_uq').on('order_lines').column('liveName').unique()")
+    const repo = read(dir, 'src/resources/order-lines/order-lines.repo.ts')
+    expect(repo).toContain('isUniqueViolation(error) ? conflict(`Order Line "${name}" already exists`) : error')
+    expect(repo.match(/\.where\('id', '=', id\)\.where\('deletedAt', 'is', null\)\.executeTakeFirst\(\)/g)).toHaveLength(3) // the read, the update and the delete
+    expect(repo.match(/if \(!(?:updated|deleted)\.numUpdatedRows\) throw notFound/g)).toHaveLength(2)
+    const routes = read(dir, 'src/resources/order-lines/order-lines.routes.ts')
+    expect(routes).toContain('errorResponses(400, 409)')
+    expect(routes).toContain('errorResponses(400, 404, 409)')
+    expect(read(dir, 'src/db/schema.ts')).toContain("liveName: import('kysely').GeneratedAlways<string | null>")
+    expect(read(dir, 'tests/order-lines.spec.ts')).toContain('names are unique among live rows')
+    // the example resource uses the same pattern
+    expect(read(dir, 'src/db/migrations/0002_items.ts')).toContain("createIndex('items_live_name_uq').on('items').column('liveName').unique()")
+    expect(read(dir, 'src/resources/items/items.repo.ts')).not.toContain('assertNameFree')
+  })
+
+  // L5: `add job delete` wrote `export const delete = …`
+  it.each([['job', 'delete', 'reserved word'], ['job', 'new', 'reserved word'], ['resource', 'classes', 'reserved word'], ['resource', 'errors', 'shadow a built-in'], ['page', 'default', 'reserved word'], ['page', 'import', 'reserved word']])('add %s %s is refused (exit 2): %s', (type, name, why) => {
+    const dir = project(['--kind', 'fullstack', '--with', 'api,jobs'])
+    const before = snapshot(dir)
+    const r = add(dir, type, name)
+    expect(r.status).toBe(2)
+    expect(r.json).toMatchObject({ ok: false, code: 'reserved_name' })
+    expect(r.json.message).toContain(why)
+    expect(snapshot(dir)).toEqual(before)
+  })
+
+  it('ordinary names that merely contain such a word are fine', () => {
+    const dir = project(['--kind', 'fullstack', '--with', 'api,jobs'])
+    for (const [type, name] of [['job', 'delete-expired'], ['resource', 'error-reports'], ['page', 'new-order']]) expect(add(dir, type!, name!).status, `${type} ${name}`).toBe(0)
   })
 
   it('never overwrites (exit 3), needs the api module (exit 4), and a removed anchor stops it before anything is written (exit 2)', () => {

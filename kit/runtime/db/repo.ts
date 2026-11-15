@@ -32,6 +32,18 @@ export function fromJson<T>(text: string | null | undefined, fallback: T): T {
 }
 
 /**
+ * A UNIQUE index (or the primary key) refused the write: MySQL ER_DUP_ENTRY (1062) / ER_DUP_ENTRY_WITH_KEY_NAME (1586),
+ * SQLite SQLITE_CONSTRAINT_UNIQUE (2067) / SQLITE_CONSTRAINT_PRIMARYKEY (1555). Map it to `conflict(...)` (409) in the
+ * repository — the driver's own message names the value and must not reach the client.
+ */
+export function isUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const e = error as { code?: unknown; errno?: unknown; errcode?: unknown }
+  if (e.code === 'ERR_SQLITE_ERROR') return e.errcode === 2067 || e.errcode === 1555
+  return e.errno === 1062 || e.errno === 1586
+}
+
+/**
  * Run `fn` in a transaction. A deadlock, a lock wait timeout or a connection that could not be opened rolls the whole
  * unit back and runs it again (bounded) — so `fn` must only touch the database through `trx`. A COMMIT whose answer
  * was lost is never replayed: it fails with COMMIT_OUTCOME_UNKNOWN (resilient.ts).
