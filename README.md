@@ -6,13 +6,18 @@ loading/empty/error patterns, head/OG defaults, and an auth hook point. Versione
 
 ## Use it
 
+```bash
+npm i -D nuxt@^4.6 && npm i @tailwindcss/vite@^4.3 tailwindcss@^4.3 lucide-vue-next@^1   # the layer's peer deps
+```
 ```ts
 // nuxt.config.ts of the app
 export default defineNuxtConfig({
-  extends: [['github:like12like12s/nuxt-base#v0.1.0', { install: true }]],
+  extends: ['github:like12like12s/nuxt-base#v0.1.1'],
   // app-specific only: devServer port, runtimeConfig, modules, extra css…
 })
 ```
+Measured: a consumer build with the peers installed takes ~6 s. `[ 'github:…', { install: true } ]` also works but runs
+`npm install` inside the cached layer (its dev deps too, ~600 packages, minutes) — avoid.
 
 - The layer already sets `ssr: false`, the Tailwind Vite plugin, `base.css`, head defaults (lang th, dark class, viewport,
   theme-color, favicon). Do **not** add `@nuxtjs/tailwindcss` or a second `tailwindcss()` plugin.

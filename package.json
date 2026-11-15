@@ -16,11 +16,6 @@
     "test": "npm run build && npm run test:unit && npm run test:e2e && npm run test:templates",
     "gate": "npm run typecheck && npm test"
   },
-  "dependencies": {
-    "@tailwindcss/vite": "^4.3.5",
-    "lucide-vue-next": "^1.0.0",
-    "tailwindcss": "^4.3.5"
-  },
   "devDependencies": {
     "@nuxt/test-utils": "^4.4.0",
     "@playwright/test": "^1.65.1",
@@ -69,5 +64,10 @@
         "true"
       ]
     ]
+  },
+  "peerDependencies": {
+    "@tailwindcss/vite": "^4.3.5",
+    "lucide-vue-next": "^1.0.0",
+    "tailwindcss": "^4.3.5"
   }
 }
