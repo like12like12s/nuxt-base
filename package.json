@@ -18,10 +18,14 @@
     "gate:kit": "node kit/tests/kit-gate.mjs"
   },
   "devDependencies": {
+    "@hono/zod-openapi": "^1.6.3",
     "@nuxt/test-utils": "^4.4.0",
     "@playwright/test": "^1.65.1",
     "@vue/test-utils": "^2.6.0",
     "happy-dom": "^21.0.4",
+    "hono": "^4.13.18",
+    "kysely": "^0.29.9",
+    "mysql2": "^3.24.6",
     "nuxt": "^4.6.4",
     "pixelmatch": "^8.0.0",
     "pngjs": "^7.0.0",
