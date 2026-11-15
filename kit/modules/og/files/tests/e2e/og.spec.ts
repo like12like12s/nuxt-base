@@ -21,14 +21,15 @@ for (const userAgent of ['facebookexternalhit/1.1 (+http://www.facebook.com/exte
   })
 }
 
-test('a crawler-visible page cannot be pointed at another site through the request', async ({ request }) => {
+test('a crawler-visible page cannot be pointed at another site through the request', async ({ request, baseURL }) => {
   const crawler = { 'user-agent': 'Twitterbot/1.0' }
   for (const [path, headers] of [
     ['/', { 'x-forwarded-host': 'evil.example', 'x-forwarded-proto': 'https' }],
     ['//evil.example/x', {}],
     ['/your-account-is-suspended', { 'x-forwarded-host': 'evil.example' }],
   ] as [string, Record<string, string>][]) {
-    const html = await (await request.get(path, { headers: { ...crawler, ...headers } })).text()
+    // an absolute URL: the client must send the path as it is (`//host/x` alone would be resolved to that host here)
+    const html = await (await request.get(`${baseURL}${path}`, { headers: { ...crawler, ...headers } })).text()
     expect(head(html), path).not.toContain('evil.example')
     expect(head(html), path).not.toMatch(/suspended/i)
     expect(content(html, 'og:url'), path).toBeUndefined() // no configured site URL -> no URL is claimed
