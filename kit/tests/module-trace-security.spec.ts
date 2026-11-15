@@ -93,3 +93,14 @@ describe('all three together', () => {
     for (const f of a.r.json.files as string[]) expect(read(a.dir, f), f).not.toMatch(/@kit:(if|else|end)|\{\{kit\./)
   })
 })
+
+describe('container preset with the modules', () => {
+  it('the env template of the deploy host lists the keys of the installed modules — and only those', () => {
+    const full = scaffold(['--kind', 'fullstack', '--with', 'auth,trace,security,notify', '--deploy', 'container'], { otlpEndpoint: 'http://collector.example:4318' })
+    const env = read(full.dir, 'docker/env.example')
+    for (const line of ['AUTH_PROXY_SECRET=', 'AUTH_ROLE_MAP=', 'OTEL_EXPORTER_OTLP_ENDPOINT=http://collector.example:4318', 'OTEL_SERVICE_NAME=demo-app-api', 'CORS_ORIGINS=', 'NOTIFIER_TOKEN=']) expect(env.split('\n'), line).toContain(line)
+    expect(env).not.toMatch(/^AUTH_DEV_MODE=/m) // never offered for a deployed instance
+    const plain = read(scaffold(['--kind', 'api', '--with', 'api', '--deploy', 'container']).dir, 'docker/env.example')
+    expect(plain).not.toMatch(/AUTH_|OTEL_|CORS_|NOTIFIER_|@kit:/)
+  })
+})
