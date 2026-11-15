@@ -13,7 +13,7 @@ import type { Context, MiddlewareHandler } from 'hono'
 import { matchedRoutes } from 'hono/route'
 import type { Kysely } from 'kysely'
 import { getContext, type RequestUser } from '../api/context.js'
-import { ApiError, forbidden, unauthorized } from '../api/errors.js'
+import { ApiError, errorBody, forbidden, unauthorized } from '../api/errors.js'
 import type { Logger } from '../api/log.js'
 import { AuthConfigError, proxyAuth, rolesFor, type ProxyTrust } from './proxy.js'
 import { TOKEN_PREFIX, verifyServiceToken } from './tokens.js'
@@ -119,6 +119,7 @@ export function createAuth<R extends string>(options: AuthOptions<R>): Auth {
   if (devUser && options.env === 'production') {
     throw new AuthConfigError('AUTH_DEV_MODE is set with NODE_ENV=production — refusing to start: the dev user would let every request in')
   }
+  if (devUser) logger?.warn('AUTH_DEV_MODE is on — every request is the dev user; never use it on a deployed instance', { subject: devUser.subject })
   const readProxy = proxyAuth(options.proxy)
   const remoteAddress = options.remoteAddress ?? socketAddress
   const proxySecret = Boolean(options.proxy.secret?.trim())
@@ -156,12 +157,21 @@ export function createAuth<R extends string>(options: AuthOptions<R>): Auth {
     if (user) context.user = user
 
     // Fail closed: a route that matched but declares nothing is not run.
-    const routes = matchedRoutes(c).filter((route) => !isMiddleware(route))
-    if (routes.length && !routes.some((route) => ruleOf(route.handler))) {
+    const matched = matchedRoutes(c)
+    const routes = matched.filter((route) => !isMiddleware(route))
+    const declared = matched.some((route) => ruleOf(route.handler))
+    if (routes.length && !declared) {
       logger?.error('route without an auth declaration — refused', { method: c.req.method, path: routes.at(-1)?.path })
       throw new ApiError('INTERNAL', 'Internal server error')
     }
     await next()
+    // What the check above cannot see in advance: a wildcard handler (`app.use('/x/*', (c) => c.json(...))`) that
+    // answers instead of passing on. Its answer is not let out either.
+    if (!declared && c.res.status !== 404) {
+      logger?.error('answer from a handler without an auth declaration — withheld', { method: c.req.method, path: c.req.path, status: c.res.status })
+      c.res = undefined
+      c.res = c.json(errorBody('INTERNAL', 'Internal server error', context.traceId), 500)
+    }
   }
 
   return {

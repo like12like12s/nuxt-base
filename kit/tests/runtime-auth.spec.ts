@@ -340,6 +340,19 @@ describe('route declarations', () => {
     expect((await t.anonymous.get('/api/v1/nope')).status).toBe(404)
   })
 
+  it('a wildcard handler that answers without a declaration: its answer is withheld (500), a pass-through one is fine', async () => {
+    const t = await setup()
+    t.app.use('/api/v1/things', async (c, next) => { c.header('x-seen', 'yes'); await next() }) // ordinary middleware
+    t.app.use('/api/v1/wild/*', (c) => c.json({ data: 'leak' }))
+    const res = await t.as('alice', 'app-admins').get('/api/v1/wild/anything')
+    expect(res.status).toBe(500)
+    expect(res.body).toEqual({ error: { code: 'INTERNAL', message: 'Internal server error', traceId: res.traceId } })
+    expect(t.lines.some((l) => l.msg === 'answer from a handler without an auth declaration — withheld')).toBe(true)
+    expect((await t.as('alice', 'app-admins').get('/api/v1/things')).status).toBe(200)
+    expect((await t.anonymous.get('/api/v1/nope')).status).toBe(404)
+    expect((await t.anonymous.get('/api/v1/things')).status).toBe(401) // a refusal of a declared route is untouched
+  })
+
   it('requireRole() without a role is refused when the route is defined', () => {
     expect(() => (requireRole as any)()).toThrow(/at least one role/)
   })
@@ -408,6 +421,7 @@ describe('dev mode', () => {
   it('every request is the fixed dev user', async () => {
     const t = await setup({ devUser, proxy: {} })
     expect(t.auth.describe().mode).toBe('dev-user')
+    expect(t.lines.filter((l) => l.level === 'warn' && /AUTH_DEV_MODE is on/.test(l.msg))).toHaveLength(1) // loud at boot
     expect((await t.anonymous.delete('/api/v1/things/1')).status).toBe(200)
   })
 

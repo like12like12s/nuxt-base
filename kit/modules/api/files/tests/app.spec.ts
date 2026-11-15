@@ -34,10 +34,11 @@ describe('trace id and request log', () => {
     const { api, lines } = t.build()
     const res = await api.get('/health/live?token=abc')
     expect(res.traceId).toMatch(TRACE_ID)
-    expect(lines).toHaveLength(1)
-    expect(Object.keys(lines[0]!).sort()).toEqual(['env', 'level', 'method', 'ms', 'msg', 'path', 'service', 'status', 'traceId', 'ts'])
-    expect(lines[0]).toMatchObject({ level: 'info', msg: 'request', service: SERVICE, env: 'test', traceId: res.traceId, method: 'GET', path: '/health/live', status: 200 })
-    expect(JSON.stringify(lines[0])).not.toContain('abc') // the query string may carry tokens
+    const requests = lines.filter((line) => line.msg === 'request') // one line per request
+    expect(requests).toHaveLength(1)
+    expect(Object.keys(requests[0]!).sort()).toEqual(['env', 'level', 'method', 'ms', 'msg', 'path', 'service', 'status', 'traceId', 'ts'])
+    expect(requests[0]).toMatchObject({ level: 'info', msg: 'request', service: SERVICE, env: 'test', traceId: res.traceId, method: 'GET', path: '/health/live', status: 200 })
+    expect(JSON.stringify(lines)).not.toContain('abc') // the query string may carry tokens
   })
 
   it('continues the trace of an incoming traceparent header', async () => {
