@@ -4,6 +4,18 @@ description: Change history of nuxt-base (newest first)
 ---
 # nuxt-base — Changelog
 
+## 2026-11-16
+
+### v0.2.0 — first kit release (epic t1092)
+- Tag v0.2.0 = layer + kit (package.json and `kit/runtime/api/kit-version.ts` bumped together) · layer change: `useAuth` also reads the API envelope of `GET /api/v1/me`
+
+### t1095 — dev-kit E: auth, trace, og, security, jobs, notify + playbooks (epic t1092)
+- `auth`: Authentik forward-auth headers believed only with the proxy secret and/or trusted source (nothing set = never), users upserted, roles from groups, `publicRoute()` / `requireAuth()` / `requireRole()` with undeclared routes listed and refused, service tokens (hash, expiry, revoke, lastUsedAt, CLI), dev mode refuses production · `trace`: OpenTelemetry server span from a hono middleware, OTLP endpoint from env, same id in `x-trace-id` and the JSON log · `og`: one Nitro `render:html` plugin for every target · `security`: secure headers, CORS allowlist, rate limit, body limit · `jobs`: skeleton + lock + exit codes, scheduler entry as a generated doc · `notify`: 65-line client
+- Playbooks `playbook-add-{resource,page,job}.md` land in the project's `.memory/docs/guides/`; `scaffold add resource|page|job` patch app files at `kit:anchor` comments (`patched[]`, exit 2 `anchor_missing`); templates use `@kit:if` blocks
+- Kit fixes: `scaffold check` reads the layer tag from nuxt.config · generated gates = typecheck → oxlint → test · nuxt-base has its own CI workflow from the `ci-github` template (GitHub Actions run green) · gate:kit builds/removes docker images one at a time (flake)
+- Tests: gate = 373 unit (4 MySQL-only skipped) + 4 e2e · `gate:kit` 18 combos incl. fullstack with every module + all three generators, api+container, nuxt-app+og+auth on wrangler's Pages runtime
+- Limits: outgoing calls untraced; rate limit per peer and per process
+
 ### t1094 — dev-kit D: api + db + testkit modules (epic t1092)
 - `api`: locked runtime `kit/runtime/api` → hono + zod-openapi `createApi`, `/api/v1`, error `{ error: { code, message, details, traceId } }` (fixed code set, 500 never leaks), `x-trace-id` + JSON request log, pagination (`limit` ≤ 200, `offset`, `sort`, `ids=`; out of range = 400, never clamped), `/health/live`, `/health/ready` (503 + checks), `/version`, `/openapi.json` + committed contract test, example `items` resource · typed client (openapi-typescript + openapi-fetch) lives in the UI as `useApi()`
 - `db`: Kysely — one migration set for SQLite (`node:sqlite` adapter, no native build) and MySQL (mysql2); base tables users / audit / service_tokens + id/createdAt/updatedAt/deletedAt; ISO-8601 varchar timestamps, JSON as text, app-generated UUIDs; pool timeouts, bounded retry on transient errors (reads replayed after a lost connection, writes never); `db:migrate` up/down/status, `db:seed`, `db:check` (used by `/health/ready` and the container preset — fails closed; `DB_MIGRATE_ON_DEPLOY=1` migrates with a backup first); `new --json` gains `backup[]`
