@@ -1,10 +1,28 @@
 {
   "name": "jobs",
-  "status": "planned",
-  "description": "Job skeleton + scheduler registration",
-  "kinds": [
-    "api",
-    "fullstack"
-  ],
-  "requires": []
+  "status": "ready",
+  "description": "Scheduled jobs: src/jobs/<name>.ts + a runner with exit codes, a lock so a job cannot overlap itself, JSON log, audit only on change. `scaffold add job <name>` writes the job, its test and the scheduler entry to register — nothing is scheduled by the kit",
+  "kinds": ["api", "fullstack"],
+  "requires": ["api", "db"],
+  "contributes": {
+    "api": {
+      "package": {
+        "scripts": {
+          "job": "tsx --env-file-if-exists=.env src/jobs/run.ts"
+        }
+      },
+      "env": [
+        { "key": "JOB_LOCK_DIR", "required": false, "secret": false, "example": "./data/locks", "description": "Where running jobs keep their lock file (a volume every instance shares)" }
+      ],
+      "files": [{ "from": "files", "to": "" }],
+      "locked": [{ "from": "runtime/jobs/runner.ts", "to": "src/kit/jobs/runner.ts" }],
+      "usage": "usage.md"
+    },
+    "project": {
+      "files": [{ "from": "../../playbooks/add-job.md", "to": "dot.memory/docs/guides/playbook-add-job.md" }]
+    }
+  },
+  "generators": {
+    "job": { "module": "generators/job.mjs", "part": "api" }
+  }
 }

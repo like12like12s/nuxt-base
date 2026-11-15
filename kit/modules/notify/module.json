@@ -1,10 +1,18 @@
 {
   "name": "notify",
-  "status": "planned",
-  "description": "Client for the central notifier",
-  "kinds": [
-    "api",
-    "fullstack"
-  ],
-  "requires": []
+  "status": "ready",
+  "description": "Client of a central notification hub (POST <url>/notify with a bearer token): off without a URL, never throws, bounded by a timeout",
+  "kinds": ["api", "fullstack"],
+  "requires": ["api"],
+  "contributes": {
+    "api": {
+      "env": [
+        { "key": "NOTIFIER_URL", "required": false, "secret": false, "example": "", "description": "Base URL of the notification hub; empty = notifications are off" },
+        { "key": "NOTIFIER_TOKEN", "required": false, "secret": true, "example": "", "description": "Bearer token of the notification hub" }
+      ],
+      "files": [{ "from": "files", "to": "" }],
+      "locked": [{ "from": "runtime/notify/client.ts", "to": "src/kit/notify/client.ts" }],
+      "usage": "usage.md"
+    }
+  }
 }

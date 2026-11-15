@@ -19,6 +19,11 @@ const shape = {
   ...database,
   APP_COMMIT: z.string().optional(),
   APP_BUILT_AT: z.string().optional(),
+  // @kit:if notify
+  // The notification hub (POST <url>/notify). Empty = notifications are off.
+  NOTIFIER_URL: z.string().url().optional(),
+  NOTIFIER_TOKEN: z.string().optional(),
+  // @kit:end
   // @kit:if security
   CORS_ORIGINS: z.string().optional(),
   RATE_LIMIT_MAX: z.coerce.number().int().min(0).default(300),
@@ -35,9 +40,16 @@ const shape = {
 }
 
 /** Keys that hold secrets: masked in logs, no detail in config errors. DATABASE_URL may carry a password. */
-// @kit:if auth
+// @kit:if auth notify
+export const SECRETS: readonly (keyof typeof shape)[] = ['DATABASE_URL', 'AUTH_PROXY_SECRET', 'NOTIFIER_TOKEN']
+// @kit:end
+// @kit:if auth !notify
 export const SECRETS: readonly (keyof typeof shape)[] = ['DATABASE_URL', 'AUTH_PROXY_SECRET']
-// @kit:else
+// @kit:end
+// @kit:if !auth notify
+export const SECRETS: readonly (keyof typeof shape)[] = ['DATABASE_URL', 'NOTIFIER_TOKEN']
+// @kit:end
+// @kit:if !auth !notify
 export const SECRETS: readonly (keyof typeof shape)[] = ['DATABASE_URL']
 // @kit:end
 
@@ -53,5 +65,21 @@ export function loadDatabaseConfig(source: Record<string, string | undefined> = 
   return loadEnv(database, { source, secrets: ['DATABASE_URL'] })
 }
 
+// @kit:if jobs
+const jobShape = {
+  ...database,
+  NODE_ENV: shape.NODE_ENV,
+  LOG_LEVEL: shape.LOG_LEVEL,
+  // Lock files of running jobs — on a volume every instance shares (the default sits next to the SQLite file).
+  JOB_LOCK_DIR: z.string().default('./data/locks'),
+}
+export type JobConfig = z.infer<z.ZodObject<typeof jobShape>>
+
+/** What the job runner (src/jobs/run.ts) needs — like the db commands, it must not depend on PORT. */
+export function loadJobConfig(source: Record<string, string | undefined> = process.env): JobConfig {
+  return loadEnv(jobShape, { source, secrets: ['DATABASE_URL'] })
+}
+
+// @kit:end
 /** The config with secrets masked — the only form that may be logged. */
 export const describeConfig = (config: Config) => redactEnv(config, SECRETS)
