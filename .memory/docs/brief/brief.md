@@ -2,7 +2,6 @@
 name: nuxt-base-brief
 description: Why nuxt-base exists and what it must / must not do
 ---
-
 # nuxt-base — Brief
 
 **Problem** (t1085 audit): UI components were copied into 17 projects and drifted in 16; scaffold skills were read ~0–10× in 2,000 sessions; 23 Nuxt versions across projects. What did not drift: a single file copied whole + a cmp check (deploy-docker.sh 9/9).

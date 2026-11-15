@@ -1,6 +1,6 @@
 {
   "name": "@like12like12s/nuxt-base",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Nuxt 4 base layer: Tailwind 4 preset + design tokens, core UI components, async/empty/error patterns, head/OG defaults, auth hook point. Extend it, never copy it.",
   "type": "module",
   "main": "./nuxt.config.ts",
@@ -22,6 +22,8 @@
     "@vue/test-utils": "^2.6.0",
     "happy-dom": "^21.0.4",
     "nuxt": "^4.6.4",
+    "pixelmatch": "^8.0.0",
+    "pngjs": "^7.0.0",
     "typescript": "^5.9.0",
     "vitest": "^5.1.0",
     "vue": "^3.5.45",

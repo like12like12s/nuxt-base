@@ -2,7 +2,6 @@
 name: nuxt-base-context
 description: Current state of nuxt-base — the Nuxt 4 base layer all internal Nuxt apps extend
 ---
-
 # nuxt-base — Context
 
 ## Current State

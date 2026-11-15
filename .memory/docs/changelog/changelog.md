@@ -2,10 +2,14 @@
 name: nuxt-base-changelog
 description: Change history of nuxt-base (newest first)
 ---
-
 # nuxt-base — Changelog
 
 ## 2026-11-15
+
+### t1086 — v0.1.2: Card header-right slot + parity-shots tool
+- `Card.vue`: `#header-right` slot ported back from drill's local copy (markup unchanged when the slot is absent) — mirror synced to `~/.dev-mem/templates/components`
+- `scripts/parity-shots.mjs`: `shoot` (full-page screenshots per route, JS errors, optional API `--rewrite`) + `diff` (pixelmatch % per page) — used for the drill/ui migration proof; devDeps pixelmatch + pngjs
+- Repo made **public** (user decision 2026-11-15) — no `GIGET_AUTH` needed in Docker/CF builds; never commit internal hosts/credentials here
 
 ### t1086 — v0.1.0: layer created (dev-velocity pilot step 1)
 - New repo: Nuxt 4.6 layer with Tailwind 4 vite plugin, `base.css` (`@theme` tokens zinc dark, class-driven `dark:`, scrollbar/focus/reduced-motion), head defaults, `runtimeConfig.public.apiBase`

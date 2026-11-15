@@ -12,7 +12,7 @@ npm i -D nuxt@^4.6 && npm i @tailwindcss/vite@^4.3 tailwindcss@^4.3 lucide-vue-n
 ```ts
 // nuxt.config.ts of the app
 export default defineNuxtConfig({
-  extends: ['github:like12like12s/nuxt-base#v0.1.1'],
+  extends: ['github:like12like12s/nuxt-base#v0.1.2'],
   // app-specific only: devServer port, runtimeConfig, modules, extra css…
 })
 ```
@@ -21,7 +21,7 @@ Measured: a consumer build with the peers installed takes ~6 s. `[ 'github:…',
 
 - The layer already sets `ssr: false`, the Tailwind Vite plugin, `base.css`, head defaults (lang th, dark class, viewport,
   theme-color, favicon). Do **not** add `@nuxtjs/tailwindcss` or a second `tailwindcss()` plugin.
-- Private repo → `GIGET_AUTH=<github token>` in the env of `nuxt build`/`nuxi prepare` (Docker build args, CF Pages env).
+- The repo is public — builds need no token. Keep internal hosts/credentials out of it.
 - Bump = change the tag. Nuxt caches git layers in `node_modules/.c12/` — delete it to force a refetch of the same tag.
 - Local development of the layer itself: `extends: ['../nuxt-base']` (relative path), then switch back to the tag.
 
@@ -55,6 +55,7 @@ npm run dev          # playground on :3517
 npm test             # build playground → vitest (nuxt env) → playwright e2e (built app) → templates mirror check
 npm run gate         # typecheck + test
 scripts/sync-templates.sh   # push component changes to ~/.dev-mem/templates/components (mirror for non-Nuxt Vue apps)
+node scripts/parity-shots.mjs shoot <url> <dir> / /page … && node scripts/parity-shots.mjs diff <before> <after> <out>   # migration proof
 git tag v0.x.y && git push --tags
 ```
 

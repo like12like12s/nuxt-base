@@ -2,16 +2,15 @@
 name: nuxt-base-usage
 description: How to consume, develop, test and release the nuxt-base layer
 ---
-
 # nuxt-base — Usage
 
 ## Consume (any Nuxt 4 app)
 ```ts
-extends: [['github:like12like12s/nuxt-base#v0.1.1']
+extends: [['github:like12like12s/nuxt-base#v0.1.2']
 ```
 - Remove from the app: `@nuxtjs/tailwindcss`, own `tailwindcss()` vite plugin, copied `Btn.vue`/`Modal.vue`/…, scrollbar css, `ssr:false` (layer sets it).
 - Keep in the app: `devServer`, `runtimeConfig`, modules, app-specific head overrides, extra css (loaded after the layer's).
-- Private repo: `GIGET_AUTH` must be set where `nuxt build` runs (Dockerfile `ARG GIGET_AUTH`, CF Pages env var).
+- Repo is public (2026-11-15) — no token needed at build time.
 - Cache: `node_modules/.c12/` — remove to refetch.
 
 ## Develop
