@@ -47,13 +47,25 @@ Measured: a consumer build with the peers installed takes ~6 s. `[ 'github:…',
 
 Override anything by defining the same file/key in the app (Nuxt deep-merges config, app files win).
 
+## Start a new project from the kit
+
+`kit/` is the project generator that ships with the layer (same tag): kinds `nuxt-app` · `api` · `fullstack`, composable
+modules, deploy presets (`cf-pages` · `container` · `pm2`), locked kit files tracked in `.scaffold.json`. Contract and
+authoring guide: [kit/README.md](kit/README.md).
+
+```bash
+node kit/bin/scaffold.mjs list
+node kit/bin/scaffold.mjs new my-app --kind nuxt-app --dir ../my-app && cd ../my-app && npm install && npm run gate
+```
+
 ## Develop the layer
 
 ```bash
 npm install
 npm run dev          # playground on :3517
 npm test             # build playground → vitest (nuxt env) → playwright e2e (built app) → templates mirror check
-npm run gate         # typecheck + test
+npm run gate         # typecheck + test (includes the kit's unit tests)
+npm run gate:kit     # kit: scaffold every kind/preset into a temp dir -> install -> gate -> build -> run
 scripts/sync-templates.sh   # push component changes to ~/.dev-mem/templates/components (mirror for non-Nuxt Vue apps)
 node scripts/parity-shots.mjs shoot <url> <dir> / /page … && node scripts/parity-shots.mjs diff <before> <after> <out>   # migration proof
 git tag v0.x.y && git push --tags

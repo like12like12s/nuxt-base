@@ -17,9 +17,21 @@ extends: [['github:like12like12s/nuxt-base#v0.1.3']
 ```bash
 cd ~/projects/nuxt-base && npm install
 npm run dev                 # playground :3517 (LAN)
-npm run gate                # typecheck + build + vitest + playwright + templates mirror check
+npm run gate                # typecheck + build + vitest (layer + kit unit tests) + playwright + templates mirror check
 scripts/sync-templates.sh   # after editing components → mirror to ~/.dev-mem/templates/components
 ```
+
+## Kit (project generator, `kit/`)
+```bash
+node kit/bin/scaffold.mjs list                                          # kinds, modules, deploy presets
+node kit/bin/scaffold.mjs new my-app --kind fullstack --deploy container --port 3920 --dir ~/projects/my-app --json
+node kit/bin/scaffold.mjs check ~/projects/my-app                       # exit 1 = locked file / layer tag drift
+npm run gate:kit                                                        # scaffold every combo -> install -> gate -> build -> run (slow, ~5 min)
+node kit/tests/kit-gate.mjs --only api --keep                           # one family, keep temp dirs
+```
+- Contract, module/kind/preset authoring: `kit/README.md` · normally called through `ai scaffold` (ai-cli), not by hand.
+- Fast kit unit tests run inside `npm run gate` (`kit/tests/*.spec.ts`); `gate:kit` is the slow proof and is part of `ai verify`.
+<!-- ai-verify: npm run gate && npm run gate:kit -->
 
 ## Release
 ```bash
