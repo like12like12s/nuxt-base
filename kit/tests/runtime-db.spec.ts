@@ -118,7 +118,7 @@ function flaky(): Flaky {
 async function flakyDb(dialect: 'sqlite' | 'mysql', retries = 2) {
   const f = flaky()
   const events: RetryEvent[] = []
-  const database = await testDb({ migrations, dialect, options: { retries, backoffMs: 1, wrapDialect: f.wrap, onRetry: (e) => events.push(e) } })
+  const database = await testDb({ migrations, dialect, options: { retries, backoffMs: 1, wrapDialect: f.wrap, onRetry: (e) => events.push(e), ...(dialect === 'sqlite' ? { connectTimeoutMs: 1 } : {}) } }) // SQLite: no lock budget, so `retries` is the bound
   f.sent.length = 0
   const count = async () => Number((await database.db.selectFrom('things').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).n)
   const insert = (name: string) => database.db.insertInto('things').values({ ...created(), name, count: 0 }).execute()
@@ -279,6 +279,25 @@ describe('transient errors — what is retried and what is not', () => {
     await expect(retryTransient(async () => { throw DEADLOCK() }, { retries: 0 })).rejects.toThrow()
   })
 
+  it('retryTransient budgets: no new attempt once `budgetMs` is spent; a lock is retried past `retries` while `lockBudgetMs` lasts', async () => {
+    // L9: a connect that already used the whole deadline is not started again (the deadline is not (1 + retries) x timeout)
+    let attempts = 0
+    await expect(retryTransient(async () => { attempts++; await new Promise((r) => setTimeout(r, 40)); throw REFUSED() }, { retries: 5, backoffMs: 1, budgetMs: 30 })).rejects.toMatchObject({ code: 'ECONNREFUSED' })
+    expect(attempts).toBe(1)
+    attempts = 0
+    await expect(retryTransient(async () => { attempts++; throw REFUSED() }, { retries: 2, backoffMs: 1, budgetMs: 5000 })).rejects.toMatchObject({ code: 'ECONNREFUSED' })
+    expect(attempts).toBe(3) // fast failures are still retried
+    // M7: lock errors keep being retried while the lock budget lasts — other kinds are not
+    attempts = 0
+    const started = Date.now()
+    await expect(retryTransient(async () => { attempts++; throw LOCK_WAIT() }, { retries: 0, backoffMs: 5, lockBudgetMs: 120 })).rejects.toMatchObject({ errno: 1205 })
+    expect(attempts).toBeGreaterThan(2)
+    expect(Date.now() - started).toBeGreaterThanOrEqual(110)
+    attempts = 0
+    await expect(retryTransient(async () => { attempts++; throw REFUSED() }, { retries: 0, backoffMs: 5, lockBudgetMs: 120 })).rejects.toMatchObject({ code: 'ECONNREFUSED' })
+    expect(attempts).toBe(1)
+  })
+
   describe.each(DIALECTS)('fault injection on %s', (dialect) => {
     it('a deadlock on a write is replayed and applied exactly once', async () => {
       const t = await flakyDb(dialect)
@@ -360,7 +379,7 @@ describe('transient errors — what is retried and what is not', () => {
       const row = { ...created(), name: 'once', count: 0 }
       const outcome = await audited(t.db, { action: 'thing.create' }, async (trx) => {
         runs++
-        await trx.insertInto('things').values({ ...row, id: `${row.id}-${runs}` }).execute()
+        await trx.insertInto('things').values({ ...row, id: newId() }).execute()
         return { result: row.id, target: `thing:${row.id}`, after: row }
       }).then(() => 'ok', (e: Error & { code?: string }) => e)
       const audit = Number((await t.db.selectFrom('audit').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).n)
@@ -393,11 +412,61 @@ describe('transient errors — what is retried and what is not', () => {
         await trx.insertInto('things').values({ ...created(), name: 'holds the write lock', count: 0 }).execute()
         await expect(second.db.insertInto('things').values({ ...created(), name: 'blocked', count: 0 }).execute()).rejects.toMatchObject({ code: 'ERR_SQLITE_ERROR' })
       })
-      expect(events.map((e) => e.kind)).toEqual(['lock'])
+      expect(events.length).toBeGreaterThanOrEqual(1)
+      expect(new Set(events.map((e) => e.kind))).toEqual(new Set(['lock']))
       // once the lock is gone the same statement goes through
       await second.db.insertInto('things').values({ ...created(), name: 'after', count: 0 }).execute()
       expect(await second.db.selectFrom('things').select('name').orderBy('name').execute()).toEqual([{ name: 'after' }, { name: 'holds the write lock' }])
     } finally {
+      await second.close()
+    }
+  })
+
+  // M7 (review t1097): node:sqlite is synchronous — a busy_timeout of seconds froze the whole process (every request,
+  // /health/live) for (1 + retries) x timeout. The wait is now short slices with asynchronous pauses in between.
+  it('SQLite: waiting for a locked database never blocks the event loop for long, and still waits out a short lock', async () => {
+    const first = await testDb({ dialect: 'sqlite', migrations })
+    const second = openDatabase<Schema>({ url: first.url, connectTimeoutMs: 1000, retries: 2, backoffMs: 1 })
+    let last = performance.now()
+    let longestStall = 0
+    const ticker = setInterval(() => { const t = performance.now(); longestStall = Math.max(longestStall, t - last); last = t }, 5)
+    const insert = (name: string) => second.db.insertInto('things').values({ ...created(), name, count: 0 }).execute()
+    try {
+      await second.ping()
+      // (a) the lock outlives the whole budget: the statement fails after about connectTimeoutMs, in small steps
+      await first.db.transaction().execute(async (trx) => {
+        await trx.insertInto('things').values({ ...created(), name: 'holds the write lock', count: 0 }).execute()
+        const started = performance.now()
+        last = started
+        await expect(insert('blocked')).rejects.toMatchObject({ code: 'ERR_SQLITE_ERROR' })
+        const waited = performance.now() - started
+        expect(waited).toBeGreaterThanOrEqual(900)
+        expect(waited).toBeLessThan(2500)
+      })
+      expect(longestStall).toBeLessThan(250) // was ~3000 ms with timeout 1000 and 2 retries
+      // (b) the lock goes away while the statement waits: it succeeds, as it did with the long blocking wait
+      const holder = first.db.transaction().execute(async (trx) => {
+        await trx.insertInto('things').values({ ...created(), name: 'short lock', count: 0 }).execute()
+        await new Promise((resolve) => setTimeout(resolve, 300))
+      })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      await insert('patient')
+      await holder
+      expect((await second.db.selectFrom('things').select('name').orderBy('name').execute()).map((r) => r.name)).toEqual(['holds the write lock', 'patient', 'short lock'])
+      // (c) a transaction is patient in the same way (audited() = withTransaction with the database's own settings)
+      const again = first.db.transaction().execute(async (trx) => {
+        await trx.updateTable('things').set({ count: 1 }).execute()
+        await new Promise((resolve) => setTimeout(resolve, 300))
+      })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      await audited(second.db, { action: 'thing.create', target: 'thing:t' }, async (trx) => {
+        await trx.insertInto('things').values({ ...created(), name: 'in a transaction', count: 0 }).execute()
+        return { result: null, after: { name: 'in a transaction' } }
+      })
+      await again
+      expect(longestStall).toBeLessThan(250)
+    } finally {
+      clearInterval(ticker)
       await second.close()
     }
   })
@@ -504,6 +573,17 @@ describe('db commands', () => {
     expect(() => verifySqliteFile(file)).not.toThrow()
   })
 
+  // L7: `down` on a database that was never migrated used to create the migration tables — after which a MySQL
+  // `up` was refused for lack of a backup of a database that "has data".
+  it('migrate down on a database that was never migrated changes nothing', async () => {
+    const database = await testDb({ dialect: 'sqlite' })
+    const { run, lines } = cli(database)
+    expect(await run('migrate', 'down')).toBe(0)
+    expect(lines).toEqual(['nothing to revert'])
+    expect(await appliedMigrations(database.db)).toBeNull()
+    expect((await database.db.introspection.getTables({ withInternalKyselyTables: true })).map((t) => t.name)).toEqual([])
+  })
+
   it('predeploy only checks — unless DB_MIGRATE_ON_DEPLOY=1, then it migrates first', async () => {
     const database = await testDb({ dialect: 'sqlite' })
     expect(await cli(database).run('predeploy')).toBe(1)
@@ -575,6 +655,19 @@ describe.skipIf(!MYSQL)('MySQL: timeouts and dropped connections', () => {
     expect(Date.now() - started).toBeLessThan(2000)
     expect(events).toEqual([])
     expect((await sql<{ one: number }>`select 1 as one`.execute(database.db)).rows).toEqual([{ one: 1 }])
+  })
+
+  // M6 (review t1097): closing the client socket does not stop the statement — an autocommit write went on and
+  // committed after the caller had been told it failed.
+  it('a write that passes its deadline is killed on the server: it does not commit later, and no statement is left running', async () => {
+    const database = await testDb({ dialect: 'mysql', migrations, options: { poolMax: 2, queryTimeoutMs: 300, retries: 0 } })
+    const row = { ...created(), name: 'slow write', count: 0 }
+    await database.db.insertInto('things').values(row).execute()
+    await expect(sql`update things set count = count + 1 + sleep(2) where id = ${row.id}`.execute(database.db)).rejects.toMatchObject({ code: 'QUERY_TIMEOUT' })
+    await new Promise((resolve) => setTimeout(resolve, 2600)) // longer than the statement would have needed
+    expect((await database.db.selectFrom('things').select('count').where('id', '=', row.id).executeTakeFirstOrThrow()).count).toBe(0)
+    const running = await sql<{ n: number }>`select count(*) as n from information_schema.processlist where info like ${'update things set count = count + 1 + sleep%'}`.execute(database.db)
+    expect(Number(running.rows[0]!.n)).toBe(0)
   })
 
   it('a real lock wait timeout between two sessions is retried, then surfaces', async () => {

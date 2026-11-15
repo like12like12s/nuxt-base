@@ -18,7 +18,11 @@ function bindable(value: unknown): SQLInputValue {
 }
 
 export interface SqliteOptions {
-  /** How long a statement waits for a lock held by another connection before failing with SQLITE_BUSY. */
+  /**
+   * How long a statement waits — synchronously, blocking the whole process — for a lock held by another connection
+   * before failing with SQLITE_BUSY (default 50 ms). Keep it small: the retry layer (resilient.ts) does the real
+   * waiting, asynchronously.
+   */
   busyTimeoutMs?: number
 }
 
@@ -28,7 +32,7 @@ export const MEMORY = ':memory:'
 export function openSqliteFile(file: string, options: SqliteOptions = {}): DatabaseSync {
   if (file !== MEMORY) mkdirSync(dirname(file), { recursive: true })
   const database = new DatabaseSync(file)
-  database.exec(`PRAGMA busy_timeout = ${Math.max(0, Math.round(options.busyTimeoutMs ?? 5000))}`)
+  database.exec(`PRAGMA busy_timeout = ${Math.max(0, Math.round(options.busyTimeoutMs ?? 50))}`)
   database.exec('PRAGMA foreign_keys = ON')
   if (file !== MEMORY) {
     database.exec('PRAGMA journal_mode = WAL')

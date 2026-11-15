@@ -92,4 +92,33 @@ describe('graceful shutdown', () => {
     expect(stuck).toHaveBeenCalledExactlyOnceWith(1)
     vi.useRealTimers()
   })
+
+  // L9: the pool stayed open when the server could not be closed or the deadline passed
+  it('cleanup (closing the pool) also runs when closing the server fails and when the deadline passes — once', async () => {
+    const exit = vi.fn()
+    const cleanup = vi.fn()
+    await gracefulShutdown(server(new Error('nope')), { exit, cleanup, onError: vi.fn(), signals: [] })()
+    expect(cleanup).toHaveBeenCalledTimes(1)
+    expect(exit).toHaveBeenCalledExactlyOnceWith(1)
+
+    vi.useFakeTimers()
+    try {
+      const late = vi.fn()
+      const closePool = vi.fn()
+      void gracefulShutdown({ close() { /* a request never finishes */ } }, { exit: late, cleanup: closePool, timeoutMs: 50, signals: [] })()
+      await vi.advanceTimersByTimeAsync(60)
+      expect(closePool).toHaveBeenCalledTimes(1)
+      expect(late).toHaveBeenCalledExactlyOnceWith(1)
+
+      // a cleanup that hangs cannot hold the exit back for more than cleanupTimeoutMs
+      const hung = vi.fn()
+      void gracefulShutdown({ close() {} }, { exit: hung, cleanup: () => new Promise<void>(() => undefined), timeoutMs: 50, cleanupTimeoutMs: 30, signals: [] })()
+      await vi.advanceTimersByTimeAsync(60)
+      expect(hung).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(40)
+      expect(hung).toHaveBeenCalledExactlyOnceWith(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

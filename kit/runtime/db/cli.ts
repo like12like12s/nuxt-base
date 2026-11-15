@@ -132,6 +132,11 @@ export async function runDbCli(argv: readonly string[], deps: DbCliDeps): Promis
       return 0
     }
     if (sub === 'down') {
+      // Nothing applied (or never migrated): return before the migrator creates its bookkeeping tables.
+      if (!(await appliedMigrations(db))?.length) {
+        out('nothing to revert')
+        return 0
+      }
       if (!(await backup())) return 3
       const results = await migrateDown(db, deps.migrations)
       for (const r of results) out(`down ${r.migrationName}  ${r.status}`)

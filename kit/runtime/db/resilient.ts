@@ -83,22 +83,45 @@ export interface ResilienceOptions {
   backoffMs?: number
   /** Called before each retry — log it as a warning. */
   onRetry?: (event: RetryEvent) => void
+  /**
+   * Keep retrying a `lock` error past `retries` until this much time has passed (pauses of at most 100 ms). SQLite
+   * uses it: its own lock wait blocks the process, so it is kept to short slices and the waiting happens here.
+   */
+  lockBudgetMs?: number
+  /** Getting a connection: no further attempt once this much time has passed (the connect deadline is a total). */
+  acquireBudgetMs?: number
 }
+
+export interface RetryOptions extends ResilienceOptions {
+  canRetry?: (kind: TransientKind) => boolean
+  /** No further attempt once this much time has passed since the first one started. */
+  budgetMs?: number
+}
+
+// The settings a database was opened with, so that withTransaction() retries the way its statements do.
+const settings = new WeakMap<object, ResilienceOptions>()
+export const rememberResilience = (db: object, options: ResilienceOptions): void => void settings.set(db, options)
+export const resilienceOf = (db: object): ResilienceOptions => settings.get(db) ?? {}
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 /** Run `fn`, replaying it on a transient error that `canRetry` accepts, at most `retries` extra times. */
-export async function retryTransient<T>(fn: (attempt: number) => Promise<T>, options: ResilienceOptions & { canRetry?: (kind: TransientKind) => boolean } = {}): Promise<T> {
-  const { retries = 2, backoffMs = 50, onRetry, canRetry = () => true } = options
+export async function retryTransient<T>(fn: (attempt: number) => Promise<T>, options: RetryOptions = {}): Promise<T> {
+  const { retries = 2, backoffMs = 50, onRetry, canRetry = () => true, lockBudgetMs = 0, budgetMs = Infinity } = options
+  const started = Date.now()
   for (let attempt = 0; ; attempt++) {
     try {
       return await fn(attempt)
     } catch (error) {
       const kind = transientKind(error)
-      if (!kind || attempt >= retries || !canRetry(kind)) throw error
+      if (!kind || !canRetry(kind)) throw error
+      const elapsed = Date.now() - started
+      const waiting = kind === 'lock' && elapsed < lockBudgetMs
+      if ((attempt >= retries && !waiting) || elapsed >= budgetMs) throw error
       onRetry?.({ attempt: attempt + 1, kind, error: message(error) })
-      await sleep(backoffMs * 2 ** attempt)
+      const pause = backoffMs * 2 ** Math.min(attempt, 10)
+      await sleep(waiting ? Math.min(pause, 100) : pause)
     }
   }
 }
@@ -142,7 +165,7 @@ class ResilientDriver implements Driver {
   }
   async acquireConnection(): Promise<DatabaseConnection> {
     // Nothing was sent yet, so every transient failure to get a connection may be retried.
-    const connection = await retryTransient(() => this.inner.acquireConnection(), this.options)
+    const connection = await retryTransient(() => this.inner.acquireConnection(), { ...this.options, budgetMs: this.options.acquireBudgetMs })
     return new ResilientConnection(connection, this.inner, this.options)
   }
   async beginTransaction(connection: DatabaseConnection, settings: TransactionSettings): Promise<void> {

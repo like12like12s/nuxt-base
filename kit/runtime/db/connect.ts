@@ -7,7 +7,7 @@
 // No error raised here ever contains the URL — it may hold a password.
 import { Kysely, sql, type Dialect } from 'kysely'
 import { mysqlDialect } from './mysql.js'
-import { resilient, type ResilienceOptions } from './resilient.js'
+import { rememberResilience, resilient, type ResilienceOptions } from './resilient.js'
 import { MEMORY, sqliteDialect } from './sqlite.js'
 
 export type DialectName = 'sqlite' | 'mysql'
@@ -45,9 +45,16 @@ export function parseDatabaseUrl(url: string): DatabaseTarget {
 
 export interface DatabaseOptions extends ResilienceOptions {
   url: string
-  /** Connecting, and waiting for a pooled connection (default 5 000 ms). SQLite: how long a statement waits for a lock. */
+  /**
+   * MySQL: connecting and waiting for a pooled connection — in total, retries included (default 5 000 ms).
+   * SQLite: how long a statement waits for a lock held by another process. node:sqlite is synchronous, so the wait
+   * is done in slices of at most 50 ms with asynchronous pauses in between: the event loop is never blocked longer.
+   */
   connectTimeoutMs?: number
-  /** Deadline of one statement on MySQL (default 10 000 ms). */
+  /**
+   * Deadline of one statement on MySQL (default 10 000 ms); the statement is killed on the server. SQLite has NO
+   * statement deadline: a statement runs synchronously to its end — keep SQLite queries small.
+   */
   queryTimeoutMs?: number
   /** MySQL pool size (default 10). */
   poolMax?: number
@@ -65,19 +72,26 @@ export interface Database<DB> {
   close(): Promise<void>
 }
 
+/** The longest one SQLite statement may block the process while it waits for a lock. */
+export const SQLITE_BUSY_SLICE_MS = 50
+
 export function openDatabase<DB>(options: DatabaseOptions): Database<DB> {
   const target = parseDatabaseUrl(options.url)
   const connectTimeoutMs = options.connectTimeoutMs ?? 5000
   const base: Dialect =
     target.dialect === 'sqlite'
-      ? sqliteDialect(target.file, { busyTimeoutMs: connectTimeoutMs })
+      ? sqliteDialect(target.file, { busyTimeoutMs: Math.min(connectTimeoutMs, SQLITE_BUSY_SLICE_MS) })
       : mysqlDialect({ ...target, connectTimeoutMs, queryTimeoutMs: options.queryTimeoutMs ?? 10_000, poolMax: options.poolMax ?? 10 })
-  const dialect = resilient(options.wrapDialect ? options.wrapDialect(base) : base, {
+  const resilience: ResilienceOptions = {
     retries: options.retries,
     backoffMs: options.backoffMs,
     onRetry: options.onRetry,
-  })
+    lockBudgetMs: target.dialect === 'sqlite' ? connectTimeoutMs : undefined,
+    acquireBudgetMs: target.dialect === 'mysql' ? connectTimeoutMs : undefined,
+  }
+  const dialect = resilient(options.wrapDialect ? options.wrapDialect(base) : base, resilience)
   const db = new Kysely<DB>({ dialect })
+  rememberResilience(db, resilience)
   let closed = false
   return {
     db,

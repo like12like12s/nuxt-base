@@ -2,10 +2,13 @@
 // `scaffold check` reports local edits and `scaffold update` overwrites them. Change it in the kit instead.
 //
 // MySQL through mysql2, behind a pool wrapper that gives every acquire and every query a deadline. A query that
-// passes its deadline is not left running on a pooled connection: the connection is destroyed (the server rolls back
-// whatever it was doing) and the caller gets a QUERY_TIMEOUT error.
+// passes its deadline is stopped on the server: closing the client socket alone would NOT do that (the statement
+// runs on, and an autocommit write still commits), so `KILL <connection id>` is sent over a short-lived side
+// connection — the server aborts the statement and rolls back what the connection had open — then the pooled
+// connection is destroyed and the caller gets a QUERY_TIMEOUT error. The kill is best effort (the server may be the
+// thing that is unreachable); a write that timed out must still be treated as "outcome unknown" by the caller.
 import { MysqlDialect, type MysqlPool, type MysqlPoolConnection } from 'kysely'
-import { createPool, type Pool, type PoolConnection } from 'mysql2'
+import { createConnection, createPool, type Pool, type PoolConnection } from 'mysql2'
 
 export interface MysqlOptions {
   host: string
@@ -32,7 +35,7 @@ type QueryCallback = (error: unknown, result: never) => void
 
 type LooseQuery = (sql: string, parameters: unknown, callback?: (error: unknown, result: unknown) => void) => unknown
 
-function wrapConnection(raw: PoolConnection, queryTimeoutMs: number): MysqlPoolConnection {
+function wrapConnection(raw: PoolConnection, queryTimeoutMs: number, kill?: (threadId: number) => void): MysqlPoolConnection {
   // mysql2's overloads do not include the (sql, values, callback) form with untyped values that Kysely uses.
   const send = raw.query.bind(raw) as unknown as LooseQuery
   return {
@@ -47,6 +50,7 @@ function wrapConnection(raw: PoolConnection, queryTimeoutMs: number): MysqlPoolC
       const timer = setTimeout(() => {
         if (settled) return
         settled = true
+        if (typeof raw.threadId === 'number') kill?.(raw.threadId)
         raw.destroy()
         callback(new DbTimeoutError('QUERY_TIMEOUT', queryTimeoutMs), undefined as never)
       }, queryTimeoutMs)
@@ -60,7 +64,7 @@ function wrapConnection(raw: PoolConnection, queryTimeoutMs: number): MysqlPoolC
   }
 }
 
-export function wrapPool(pool: Pool, options: Pick<MysqlOptions, 'connectTimeoutMs' | 'queryTimeoutMs'>): MysqlPool {
+export function wrapPool(pool: Pool, options: Pick<MysqlOptions, 'connectTimeoutMs' | 'queryTimeoutMs'> & { kill?: (threadId: number) => void }): MysqlPool {
   const wrappers = new WeakMap<PoolConnection, MysqlPoolConnection>()
   return {
     getConnection(callback) {
@@ -80,7 +84,7 @@ export function wrapPool(pool: Pool, options: Pick<MysqlOptions, 'connectTimeout
         if (error) return callback(error, undefined as never)
         let wrapper = wrappers.get(raw)
         if (!wrapper) {
-          wrapper = wrapConnection(raw, options.queryTimeoutMs)
+          wrapper = wrapConnection(raw, options.queryTimeoutMs, options.kill)
           wrappers.set(raw, wrapper)
         }
         callback(null, wrapper)
@@ -106,5 +110,15 @@ export function mysqlDialect(options: MysqlOptions) {
     dateStrings: true,
     multipleStatements: false,
   })
-  return new MysqlDialect({ pool: wrapPool(pool, options) })
+  // Not through the pool: it may be exhausted by the very statements that are being killed.
+  const kill = (threadId: number) => {
+    const side = createConnection({ host: options.host, port: options.port, user: options.user, password: options.password, connectTimeout: options.connectTimeoutMs })
+    const giveUp = setTimeout(() => side.destroy(), options.connectTimeoutMs + 2000)
+    side.on('error', () => undefined) // best effort: the QUERY_TIMEOUT error is what the caller sees
+    side.query(`KILL ${Math.trunc(threadId)}`, () => {
+      clearTimeout(giveUp)
+      side.destroy()
+    })
+  }
+  return new MysqlDialect({ pool: wrapPool(pool, { ...options, kill }) })
 }

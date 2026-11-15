@@ -19,7 +19,13 @@ npm run db:check                # exit 0 only when database == code (what /healt
 - Resilience: connect and statement deadlines (`DB_CONNECT_TIMEOUT_MS`, `DB_QUERY_TIMEOUT_MS`), `DB_RETRIES` extra
   attempts on transient errors only (deadlock, lock wait, connection refused; a lost connection is replayed for reads,
   not for writes). `withTransaction()` replays a whole transaction on a deadlock. The pool closes on SIGTERM.
-- Backup before migrate: SQLite — a verified snapshot in `data/backups/` (automatic; a backup that fails or does not verify stops the migration, exit 3). MySQL — set `DB_BACKUP_CMD` to your dump
+  - A MySQL statement past `DB_QUERY_TIMEOUT_MS` is killed on the server (`KILL`), so a timed-out write does not
+    commit afterwards. SQLite has no statement deadline (it runs synchronously) — keep its queries small; waiting for
+    a lock held by another process takes at most `DB_CONNECT_TIMEOUT_MS`, in 50 ms slices that do not freeze the API.
+  - A `COMMIT` whose answer is lost (connection reset, timeout) fails with `COMMIT_OUTCOME_UNKNOWN` and is never
+    replayed: the write may or may not be there — read it back before doing it again.
+- Backup before migrate: SQLite — a verified snapshot in `data/backups/` (automatic; a backup that fails or does
+  not verify stops the migration, exit 3). MySQL — set `DB_BACKUP_CMD` to your dump
   command; without it `db:migrate` refuses (exit 3) unless you pass `--no-backup` / `DB_MIGRATE_NO_BACKUP=1` because
   the backup was taken another way. Register the database with your backup job (`scaffold new --json` lists it under
   `backup`).

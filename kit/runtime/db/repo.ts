@@ -6,7 +6,7 @@
 import type { Kysely, Transaction } from 'kysely'
 import { currentActor, currentTraceId } from '../api/context.js'
 import { newId, now } from './clock.js'
-import { retryTransient, type ResilienceOptions } from './resilient.js'
+import { resilienceOf, retryTransient, type ResilienceOptions } from './resilient.js'
 
 /** Values of the standard columns for a new row. */
 export const created = () => {
@@ -33,10 +33,12 @@ export function fromJson<T>(text: string | null | undefined, fallback: T): T {
 
 /**
  * Run `fn` in a transaction. A deadlock, a lock wait timeout or a connection that could not be opened rolls the whole
- * unit back and runs it again (bounded) — so `fn` must only touch the database through `trx`.
+ * unit back and runs it again (bounded) — so `fn` must only touch the database through `trx`. A COMMIT whose answer
+ * was lost is never replayed: it fails with COMMIT_OUTCOME_UNKNOWN (resilient.ts).
  */
 export function withTransaction<DB, T>(db: Kysely<DB>, fn: (trx: Transaction<DB>) => Promise<T>, options: ResilienceOptions = {}): Promise<T> {
-  return retryTransient(() => db.transaction().execute(fn), { ...options, canRetry: (kind) => kind !== 'connection' })
+  // Defaults = what the database was opened with (retries, backoff, SQLite's lock budget); `options` override them.
+  return retryTransient(() => db.transaction().execute(fn), { ...resilienceOf(db), ...options, canRetry: (kind) => kind !== 'connection' })
 }
 
 export interface AuditEntry {
