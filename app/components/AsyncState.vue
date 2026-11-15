@@ -1,7 +1,7 @@
 <template>
   <LoadingState v-if="pending && !hasData" :rows="rows" />
   <ErrorState v-else-if="error" :error="error" :retry="retry" />
-  <slot v-else-if="empty" name="empty"><EmptyState :title="emptyTitle" :description="emptyDescription" /></slot>
+  <slot v-else-if="empty" name="empty"><EmptyState :title="emptyTitle ?? nb.empty ?? 'ยังไม่มีข้อมูล'" :description="emptyDescription" /></slot>
   <slot v-else />
 </template>
 
@@ -19,5 +19,7 @@ withDefaults(defineProps<{
   rows?: number
   emptyTitle?: string
   emptyDescription?: string
-}>(), { pending: false, empty: false, hasData: false, rows: 3, emptyTitle: 'ยังไม่มีข้อมูล', emptyDescription: '' })
+}>(), { pending: false, empty: false, hasData: false, rows: 3, emptyTitle: undefined, emptyDescription: '' })
+// Default words follow the app's language (app.config nuxtBase.lang, provided by the layer's labels plugin).
+const nb = inject<{ empty?: string }>('nb-labels', {})
 </script>

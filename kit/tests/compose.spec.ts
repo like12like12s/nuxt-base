@@ -47,7 +47,7 @@ describe('new — composition', () => {
 
   it('--json for `new` has exactly the contract keys', () => {
     const { r } = scaffold(['--kind', 'api', '--port', '3920'])
-    expect(Object.keys(r.json)).toEqual(['ok', 'dir', 'name', 'title', 'description', 'kind', 'modules', 'db', 'deploy', 'sample', 'kitVersion', 'files', 'locked', 'services', 'env', 'backup', 'next'])
+    expect(Object.keys(r.json)).toEqual(['ok', 'dir', 'name', 'title', 'description', 'kind', 'modules', 'db', 'deploy', 'sample', 'lang', 'kitVersion', 'files', 'locked', 'services', 'env', 'backup', 'next'])
     expect(r.json).toMatchObject({ ok: true, name: 'demo-app', kind: 'api', modules: ['base'], db: null, deploy: null, kitVersion: rootPkg.version, backup: [] })
     expect(r.json.services).toEqual([{ id: 'demo-app-api', name: 'API', type: 'api', port: 3920, healthPath: '/health/live' }])
     expect(r.json.env).toContainEqual({ key: 'PORT', required: true, secret: false })
@@ -145,6 +145,77 @@ describe('new — dependency overrides of the UI', () => {
     const fullstack = scaffold(['--kind', 'fullstack']).dir
     expect(JSON.parse(read(fullstack, 'api/package.json')).overrides).toBeUndefined()
     expect(JSON.parse(read(fullstack, 'package.json')).overrides).toBeUndefined()
+  })
+})
+
+// Finding #15 of the first real use: the layer's defaults were Thai and the generated pages English — one app, two
+// languages. A project now has ONE: `--lang th|en` (default th) drives the generated strings and the layer's labels.
+describe('new — one UI language (--lang)', () => {
+  const THAI = /[\u0E00-\u0E7F]/
+  const uiFiles = (dir: string, files: string[]) => files.filter((f) => /\.(vue|ts)$/.test(f) && !/(^|\/)(kit|node_modules)\//.test(f) && !f.startsWith('api/')).map((f) => [f, read(dir, f)] as const)
+
+  it('default th: nothing new in app.config (the layer default), Thai strings in the generated page and its tests', () => {
+    const { dir, r } = scaffold(['--kind', 'nuxt-app'])
+    expect(r.json.lang).toBe('th')
+    expect(JSON.parse(read(dir, '.scaffold.json')).answers).not.toHaveProperty('lang') // manifests of existing projects stay as they are
+    expect(read(dir, 'app/app.config.ts')).not.toMatch(/lang:/)
+    expect(read(dir, 'app/pages/index.vue')).toContain(">ทักทาย</Btn>")
+    expect(read(dir, 'tests/e2e/app.spec.ts')).toContain("getByText('ใช้งานได้')")
+    expect(read(dir, 'app/pages/index.vue')).not.toContain('Say hello')
+    expect(scaffold(['--kind', 'nuxt-app', '--lang', 'th']).r.json.files).toEqual(r.json.files)
+    expect(snapshot(scaffold(['--kind', 'nuxt-app', '--lang', 'th']).dir)).toEqual(snapshot(dir))
+  })
+
+  it('--lang en: app.config sets the layer language, and no generated UI file holds a Thai string', () => {
+    for (const args of [['--kind', 'nuxt-app'], ['--kind', 'fullstack', '--with', 'db,auth,api,og']]) {
+      const { dir, r } = scaffold([...args, '--lang', 'en'])
+      expect(r.status, r.stdout).toBe(0)
+      expect(r.json.lang).toBe('en')
+      expect(JSON.parse(read(dir, '.scaffold.json')).answers.lang).toBe('en')
+      const ui = args.includes('fullstack') ? 'ui/' : ''
+      const config = read(dir, `${ui}app/app.config.ts`)
+      expect(config).toMatch(/lang: 'en'/)
+      expect(config).toContain("locale: 'en_US'")
+      expect(read(dir, `${ui}app/pages/index.vue`)).toContain('>Say hello</Btn>')
+      for (const [file, text] of uiFiles(dir, r.json.files)) expect(text, file).not.toMatch(THAI)
+      for (const [file, text] of uiFiles(dir, r.json.files)) expect(text, file).not.toMatch(/@kit:/)
+    }
+  })
+
+  it('the generators follow the project language (read from the manifest)', () => {
+    const th = scaffold(['--kind', 'nuxt-app']).dir
+    const en = scaffold(['--kind', 'nuxt-app', '--lang', 'en']).dir
+    for (const dir of [th, en]) expect(cli(['add', 'page', 'reports', '--dir', dir, '--json']).status).toBe(0)
+    expect(read(th, 'app/pages/reports.vue')).toContain('<EmptyState title="ยังไม่มีข้อมูล"')
+    expect(read(th, 'tests/e2e/reports.spec.ts')).toContain("getByText('ยังไม่มีข้อมูล')")
+    expect(read(en, 'app/pages/reports.vue')).toContain('<EmptyState title="Nothing here yet"')
+    expect(read(en, 'app/pages/reports.vue')).not.toMatch(THAI)
+    expect(read(en, 'tests/e2e/reports.spec.ts')).not.toMatch(THAI)
+  })
+
+  it('an unknown language is a usage error; a project without a UI has none; check / update keep it', () => {
+    const bad = scaffold(['--kind', 'nuxt-app', '--lang', 'fr'])
+    expect(bad.r.status).toBe(2)
+    expect(bad.r.json.message).toContain('--lang must be one of th|en')
+    const api = scaffold(['--kind', 'api', '--lang', 'en'])
+    expect(api.r.json.lang).toBeNull()
+    expect(JSON.parse(read(api.dir, '.scaffold.json')).answers).not.toHaveProperty('lang')
+    const { dir } = scaffold(['--kind', 'fullstack', '--with', 'api,db', '--lang', 'en'])
+    expect(cli(['check', dir, '--json']).json).toMatchObject({ clean: true, drift: [] })
+    expect(cli(['update', dir, '--json']).json.updated).toEqual([])
+    // a hand-edited manifest with a language that does not exist falls back to th instead of failing
+    const manifest = JSON.parse(read(dir, '.scaffold.json'))
+    manifest.answers.lang = 'xx'
+    writeFileSync(join(dir, '.scaffold.json'), JSON.stringify(manifest, null, 2) + '\n')
+    expect(cli(['check', dir, '--json']).status).toBe(0)
+  })
+
+  it('fullstack with the API: the UI gets the locked error helper that turns validation `details` into field messages', () => {
+    const { dir, r } = scaffold(['--kind', 'fullstack', '--with', 'api,db'])
+    expect(r.json.locked).toContain('ui/app/utils/api-error.ts')
+    expect(read(dir, 'ui/app/utils/api-error.ts')).toContain('export function apiProblem(error: unknown): ApiProblem')
+    expect(r.json.files).toContain('ui/tests/unit/api-error.spec.ts')
+    expect(scaffold(['--kind', 'nuxt-app']).r.json.locked).not.toContain('app/utils/api-error.ts')
   })
 })
 

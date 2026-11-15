@@ -1,6 +1,11 @@
 // Layer-wide defaults. Consumers override any key in their own app.config.ts (deep-merged).
 export default defineAppConfig({
   nuxtBase: {
+    // Language of the layer's own words (loading / empty / error / retry / confirm / cancel / the error page) and of
+    // <html lang>: 'th' | 'en'. One language per app — set it once, here.
+    lang: 'th' as 'th' | 'en',
+    // Override single labels of that language: { retry: 'Reload the list' }. Keys: composables/useLabels.ts.
+    labels: {} as Partial<Record<'loading' | 'empty' | 'loadFailed' | 'retry' | 'confirm' | 'cancel' | 'notFound' | 'error' | 'home' | 'reload', string>>,
     site: {
       name: 'App',
       description: '',
@@ -23,6 +28,8 @@ export default defineAppConfig({
 declare module 'nuxt/schema' {
   interface AppConfigInput {
     nuxtBase?: {
+      lang?: 'th' | 'en'
+      labels?: Partial<Record<'loading' | 'empty' | 'loadFailed' | 'retry' | 'confirm' | 'cancel' | 'notFound' | 'error' | 'home' | 'reload', string>>
       site?: { name?: string; description?: string; ogImage?: string; locale?: string; twitterCard?: 'summary' | 'summary_large_image' }
       auth?: { enabled?: boolean; meEndpoint?: string; loginUrl?: string }
     }

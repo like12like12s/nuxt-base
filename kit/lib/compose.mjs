@@ -3,6 +3,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join, posix, resolve, sep } from 'node:path'
 import { incompatible, usageError } from './errors.mjs'
+import { DEFAULT_LANG, LANGS } from './i18n.mjs'
 import { lockHash, toJson, walk } from './fsutil.mjs'
 import { mergePackage, stringifyPackage } from './pkg.mjs'
 import { render, undot } from './render.mjs'
@@ -169,6 +170,11 @@ export function resolveSelection(kit, input) {
     if (!preset.kinds.includes(kind.name)) throw incompatible('incompatible_preset', `deploy preset "${preset.name}" does not support kind "${kind.name}" (supports: ${preset.kinds.join(', ')})`)
   }
 
+  // One UI language per project: the generated pages and the layer's own labels (app.config `lang`) say the same
+  // language. th is the default (the layer's default); it only matters to projects with a UI.
+  const lang = input.lang ?? DEFAULT_LANG
+  if (!LANGS.includes(lang)) throw usageError(`--lang must be one of ${LANGS.join('|')}`)
+
   // The example resource `items` (table, routes, tests, seed rows, the `editor` role) comes with the api module unless
   // the project is created with --no-sample. Without the api module there is no sample to leave out.
   const sample = modules.includes('api') && input.sample !== false
@@ -187,6 +193,7 @@ export function resolveSelection(kit, input) {
     preset,
     ports,
     sample,
+    lang,
     warnings,
     layerRef: hasUi ? context.layerRef || kit.layerRef : null,
     // Everything needed to re-compose this exact project later (check / update read it back from .scaffold.json).
@@ -199,6 +206,7 @@ export function resolveSelection(kit, input) {
       deploy: deployCtx,
       // Only recorded when given, so projects without it keep the same .scaffold.json.
       ...(modules.includes('api') && !sample ? { sample: false } : {}),
+      ...(hasUi && lang !== DEFAULT_LANG ? { lang } : {}),
       ...(context.mysqlHost ? { mysqlHost: String(context.mysqlHost) } : {}),
       ...(context.otlpEndpoint ? { otlpEndpoint: String(context.otlpEndpoint) } : {}),
       ...(context.authentikUrl ? { authentikUrl: String(context.authentikUrl) } : {}),
@@ -233,7 +241,7 @@ export function compose(kit, input) {
 
   const when = { kind: kind.name, modules: sel.modules, db: sel.db, sample: sel.sample }
   // What `@kit:if` blocks in templates can ask (lib/render.mjs).
-  const flags = new Set([...sel.modules, `kind:${kind.name}`, ...(sel.db ? [`db:${sel.db}`] : []), ...(preset ? [`deploy:${preset.name}`] : []), ...(sel.sample ? ['sample'] : [])])
+  const flags = new Set([...sel.modules, `kind:${kind.name}`, ...(sel.db ? [`db:${sel.db}`] : []), ...(preset ? [`deploy:${preset.name}`] : []), ...(sel.sample ? ['sample'] : []), `lang:${sel.lang}`])
   for (const { unit, only } of applications) {
     if (!unit) throw new Error(`kit is inconsistent: a unit referenced by kind "${kind.name}" is missing`)
     for (const [target, c] of Object.entries(unit.contributes ?? {})) {
@@ -270,6 +278,7 @@ export function compose(kit, input) {
     titleJson: JSON.stringify(sel.answers.title),
     descriptionJson: JSON.stringify(sel.answers.description),
     kind: kind.name,
+    lang: sel.lang,
     kitVersion: kit.version,
     layerRef: sel.layerRef ?? '',
     modules: csv(sel.modules),
@@ -398,6 +407,7 @@ export function compose(kit, input) {
     db: sel.db,
     deploy: preset?.name ?? null,
     sample: sel.sample,
+    lang: parts.some((p) => p.type === 'ui') ? sel.lang : null,
     kitVersion: kit.version,
     layerRef: sel.layerRef,
     parts,
@@ -428,6 +438,8 @@ export function composeFromManifest(kit, manifest) {
     port: a.port,
     apiPort: both ? a.apiPort : undefined,
     sample: a.sample !== false,
+    // A stored value that is not a language (hand-edited manifest) falls back to the default instead of failing check.
+    lang: LANGS.includes(a.lang) ? a.lang : undefined,
     context: { title: a.title, description: a.description, layerRef: manifest.layerRef ?? undefined, deploy: a.deploy, mysqlHost: a.mysqlHost, otlpEndpoint: a.otlpEndpoint, authentikUrl: a.authentikUrl },
   })
 }

@@ -5,6 +5,9 @@ import Btn from '../../app/components/Btn.vue'
 import AsyncState from '../../app/components/AsyncState.vue'
 import ErrorState from '../../app/components/ErrorState.vue'
 import EmptyState from '../../app/components/EmptyState.vue'
+import LoadingState from '../../app/components/LoadingState.vue'
+import ConfirmModal from '../../app/components/ConfirmModal.vue'
+import { NB_LABELS, NB_LABELS_KEY, resolveLabels } from '../../app/composables/useLabels'
 
 describe('Btn', () => {
   it('renders a button with the primary variant by default', async () => {
@@ -66,5 +69,63 @@ describe('ErrorState / EmptyState', () => {
     expect(w.find('h2').text()).toBe('ยังไม่มีรายการ')
     expect(w.text()).toContain('เพิ่มรายการแรก')
     expect(w.text()).toContain('CTA')
+  })
+})
+
+// One language per app (kit finding #15): the layer's own words come from app.config (nuxtBase.lang / labels) through
+// provide/inject. Default = Thai, exactly as before.
+describe('labels follow the app language', () => {
+  const en = { global: { provide: { [NB_LABELS_KEY]: resolveLabels('en') } } }
+
+  it('resolveLabels: th by default and for an unknown language; en is complete; overrides replace single entries only', () => {
+    expect(resolveLabels(undefined)).toEqual(NB_LABELS.th)
+    expect(resolveLabels('fr')).toEqual(NB_LABELS.th)
+    expect(Object.keys(NB_LABELS.en).sort()).toEqual(Object.keys(NB_LABELS.th).sort())
+    for (const value of Object.values(NB_LABELS.en)) expect(value).toMatch(/^[\x20-\x7e…]+$/) // no Thai left in the English set
+    expect(resolveLabels('en', { retry: 'Reload the list', bogus: 'x' } as never)).toEqual({ ...NB_LABELS.en, retry: 'Reload the list' })
+    expect(resolveLabels('en', { retry: '' })).toEqual(NB_LABELS.en)
+  })
+
+  it('the app config of the layer defaults to th, and useLabels() reads it', () => {
+    expect(useAppConfig().nuxtBase.lang).toBe('th')
+    expect(useLabels()).toEqual(NB_LABELS.th)
+  })
+
+  it('default (th): the words are the ones the components always had', async () => {
+    const error = await mountSuspended(ErrorState, { props: { error: new Error('x'), retry: () => {} } })
+    expect(error.text()).toContain('โหลดข้อมูลไม่สำเร็จ')
+    expect(error.find('button').text()).toBe('ลองใหม่')
+    expect((await mountSuspended(LoadingState)).find('[role="status"]').attributes('aria-label')).toBe('กำลังโหลด…')
+    expect((await mountSuspended(AsyncState, { props: { empty: true } })).text()).toContain('ยังไม่มีข้อมูล')
+  })
+
+  it('en: loading, empty, error title and retry are English — nothing Thai is left on screen', async () => {
+    const error = await mountSuspended(ErrorState, { props: { error: new Error('boom'), retry: () => {} }, ...en })
+    expect(error.text()).toContain('Could not load the data')
+    expect(error.find('button').text()).toBe('Try again')
+    expect((await mountSuspended(LoadingState, en)).find('[role="status"]').attributes('aria-label')).toBe('Loading…')
+    const empty = await mountSuspended(AsyncState, { props: { empty: true }, ...en })
+    expect(empty.text()).toContain('Nothing here yet')
+    const failed = await mountSuspended(AsyncState, { props: { error: new Error('boom'), retry: () => {} }, ...en })
+    expect(failed.find('[role="alert"] button').text()).toBe('Try again')
+    for (const w of [error, empty, failed]) expect(w.text()).not.toMatch(/[\u0E00-\u0E7F]/)
+  })
+
+  it('a prop still wins over the language', async () => {
+    const w = await mountSuspended(ErrorState, { props: { title: 'Custom title', error: new Error('x') }, ...en })
+    expect(w.text()).toContain('Custom title')
+    expect((await mountSuspended(LoadingState, { props: { label: 'Fetching' }, ...en })).find('.sr-only').text()).toBe('Fetching')
+  })
+
+  it('ConfirmModal: confirm / cancel follow the language, the props win, and without a provider it stays Thai', async () => {
+    const buttons = async (options: object) => {
+      await mountSuspended(ConfirmModal, { props: { modelValue: true, title: 'Delete?' }, attachTo: document.body, ...options } as never)
+      const texts = [...document.body.querySelectorAll('[role="dialog"] button')].map((b) => b.textContent?.trim())
+      document.body.innerHTML = ''
+      return texts
+    }
+    expect(await buttons(en)).toEqual(['Cancel', 'Confirm'])
+    expect(await buttons({ ...en, props: { modelValue: true, title: 'Delete?', confirmLabel: 'Delete', cancelLabel: 'Keep' } })).toEqual(['Keep', 'Delete'])
+    expect(await buttons({ global: { provide: { [NB_LABELS_KEY]: {} } } })).toEqual(['ยกเลิก', 'ยืนยัน'])
   })
 })

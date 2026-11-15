@@ -24,7 +24,13 @@ test('home renders with the layer styles and no JS errors', async ({ page }) => 
   expect(body).not.toBe('rgb(255, 255, 255)')
 
   await page.getByTestId('hello').click()
+  // @kit:if lang:en
   await expect(page.getByText('It works')).toBeVisible()
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en')
+  // @kit:else
+  await expect(page.getByText('ใช้งานได้')).toBeVisible()
+  await expect(page.locator('html')).toHaveAttribute('lang', 'th')
+  // @kit:end
   expect(errors).toEqual([])
 })
 
@@ -34,6 +40,13 @@ test('unknown routes show the layer error page', async ({ page }) => {
   // @kit:end
   await page.goto('/does-not-exist')
   await expect(page.getByText('404')).toBeVisible()
+  // the layer's error page speaks the app's language (app.config `lang`)
+  // @kit:if lang:en
+  await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible()
+  await expect(page.locator('body')).not.toContainText(/[\u0E00-\u0E7F]/)
+  // @kit:else
+  await expect(page.getByRole('heading', { name: 'ไม่พบหน้านี้' })).toBeVisible()
+  // @kit:end
 })
 
 // The UI server answers every page with the baseline security headers (nuxt.config.ts, routeRules).

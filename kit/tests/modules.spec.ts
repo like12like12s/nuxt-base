@@ -111,7 +111,7 @@ describe('kind api --with api,db', () => {
 
   it('--json reports what a backup job must cover, and registers nothing itself', () => {
     expect(r.json.backup).toEqual([{ id: 'demo-app-db', service: 'demo-app-api', engine: 'sqlite', envKey: 'DATABASE_URL', path: 'data/demo-app.db' }])
-    expect(Object.keys(r.json)).toEqual(['ok', 'dir', 'name', 'title', 'description', 'kind', 'modules', 'db', 'deploy', 'sample', 'kitVersion', 'files', 'locked', 'services', 'env', 'backup', 'next'])
+    expect(Object.keys(r.json)).toEqual(['ok', 'dir', 'name', 'title', 'description', 'kind', 'modules', 'db', 'deploy', 'sample', 'lang', 'kitVersion', 'files', 'locked', 'services', 'env', 'backup', 'next'])
     expect(r.json.next.join('\n')).toMatch(/db:migrate -- up/)
   })
 
@@ -262,7 +262,7 @@ describe('fullstack --with api,db', () => {
     expect(r.json.backup).toEqual([{ id: 'demo-app-db', service: 'demo-app-api', engine: 'sqlite', envKey: 'DATABASE_URL', path: 'api/data/demo-app.db' }])
     expect(r.json.locked).toContain('api/src/kit/testing/test-db.ts')
     expect(r.json.locked).toContain('ui/tests/kit/e2e.ts')
-    expect(r.json.locked.filter((p: string) => p.startsWith('ui/'))).toEqual(['ui/tests/kit/e2e.ts'])
+    expect(r.json.locked.filter((p: string) => p.startsWith('ui/'))).toEqual(['ui/app/utils/api-error.ts', 'ui/tests/kit/e2e.ts'])
   })
 })
 

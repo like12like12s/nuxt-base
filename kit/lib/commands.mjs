@@ -60,6 +60,8 @@ export function cmdNew(kit, opts) {
       deploy: plan.deploy,
       // true = the example resource `items` is part of the project (the api module without --no-sample)
       sample: plan.sample,
+      // 'th' | 'en' — the one language of the UI (generated pages + the layer's labels); null without a UI
+      lang: plan.lang,
       kitVersion: plan.kitVersion,
       files: [...plan.files.map((f) => f.path), ...plan.symlinks.map((s) => s.path)],
       locked: Object.keys(plan.locked),

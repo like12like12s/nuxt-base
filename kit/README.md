@@ -13,8 +13,8 @@ everything around it: preflight, install, gate, git, registration.
 
 ```
 node <KIT>/bin/scaffold.mjs new <name> --kind nuxt-app|api|fullstack [--with a,b,c] [--db sqlite|mysql]
-     [--deploy cf-pages|container|pm2] [--port N] [--api-port N] [--no-sample] --dir <target>
-     [--context ctx.json] [--dry-run] [--json]
+     [--deploy cf-pages|container|pm2] [--port N] [--api-port N] [--no-sample] [--lang th|en]
+     --dir <target> [--context ctx.json] [--dry-run] [--json]
 node <KIT>/bin/scaffold.mjs add resource|page|job <name> [--dir <project>] [--json]
 node <KIT>/bin/scaffold.mjs check [<dir>] [--json]     exit 0 clean · 1 drift
 node <KIT>/bin/scaffold.mjs update [<dir>] [--json]    re-copy locked files + bump the layer tag
@@ -39,7 +39,7 @@ With `--json` the result is one JSON document on stdout. Errors: `{ "ok": false,
 the exit code (without `--json`: the message on stderr).
 
 ```
-new     { ok, dir, name, title, description, kind, modules[], db, deploy, sample, kitVersion, files[], locked[],
+new     { ok, dir, name, title, description, kind, modules[], db, deploy, sample, lang, kitVersion, files[], locked[],
           services[{ id, name, type: "web"|"api", port, healthPath, internal? }], env[{ key, required, secret }],
           backup[{ id, service, engine: "sqlite"|"mysql", envKey, path? | database? }], next[] }
           (+ "dryRun": true with --dry-run — same plan, nothing written)
@@ -68,6 +68,11 @@ list    { ok, kitVersion, layerRef, kinds[{ name, description, parts[{ type, dir
   otherwise). It is recorded as `answers.sample: false` — only then, so existing manifests are unchanged — and
   `add resource` follows it (writes are admin-only, matrix rows without the editor column). The first resource of
   such a project is `scaffold add resource <name>`.
+- `--lang th|en` (default `th`): the ONE language of the project's UI. It decides the strings of the generated
+  pages (also of every later `add page` / `add resource`) and, through `nuxtBase.lang` in the UI's `app.config.ts`,
+  the layer's own words (loading, empty, error, retry, confirm / cancel, the error page, `<html lang>`). `lang` in
+  the result is `"th"`, `"en"`, or `null` for a project without a UI; it is recorded as `answers.lang` only when it is
+  not the default. An unknown value is exit 2.
 - `services[].internal: true` (only present when true): the API of a `fullstack` project deployed with the
   `container` preset. The compose file publishes no host port for it — the UI reaches it over the compose network —
   so `port` is its development port only: do not register a health probe or a route against it on the deploy host.
@@ -90,7 +95,7 @@ list    { ok, kitVersion, layerRef, kinds[{ name, description, parts[{ type, dir
   off); `authentikUrl` is named in the operator instructions of the `auth` module. Keys a module does not use are
   ignored.
 - `.scaffold.json` (in every generated project):
-  `{ "kit", "kind", "modules", "db", "deploy", "layerRef", "answers": { name, title, description, port, apiPort, deploy, sample?, mysqlHost?, otlpEndpoint?, authentikUrl? }, "locked": { "<path>": "sha256:<hex>" } }`.
+  `{ "kit", "kind", "modules", "db", "deploy", "layerRef", "answers": { name, title, description, port, apiPort, deploy, sample?, lang?, mysqlHost?, otlpEndpoint?, authentikUrl? }, "locked": { "<path>": "sha256:<hex>" } }`.
   `answers` is everything needed to re-compose the project, which is how `check` / `update` / `add` work.
   A locked hash carries its algorithm prefix on purpose: a bare 64-character hex value beside a key such as
   `…/tokens.ts` is what secret scanners report as a generic API key, and a fresh project must pass a default
@@ -157,7 +162,8 @@ playbooks/              add-resource.md · add-page.md · add-job.md — copied 
 presets/deploy/<name>/  preset.json + files/         cf-pages · container · pm2
 runtime/                files copied byte for byte into apps and locked: runtime/<area>/* -> src/kit/<area>/*
                         (api · db · auth · trace · security · jobs · notify · testing; testing/e2e.ts -> the UI's
-                        tests/kit/, og/og.ts -> the UI's server/kit/), project/gate-ci.mjs -> scripts/
+                        tests/kit/, og/og.ts -> the UI's server/kit/, ui/api-error.ts -> the UI's app/utils/),
+                        project/gate-ci.mjs -> scripts/
 tests/                  *.spec.ts (unit, in `npm run gate`) · kit-gate.mjs + combos.mjs (`npm run gate:kit`)
 ```
 
@@ -200,14 +206,14 @@ Rules that keep the output deterministic — **same inputs, byte-identical outpu
 - Units apply in a fixed order: borrowed part kinds → the kind → `base` → other modules by name → the deploy preset.
   `package.json` fragments merge key by key and the later unit wins; dependency maps are written sorted.
 - Templates may use `{{kit.<var>}}` only (Vue's own `{{ }}` is untouched). An unknown variable is an error. Variables:
-  `name title description titleJson descriptionJson kind kitVersion layerRef modules db deploy port uiPort apiPort
+  `name title description titleJson descriptionJson kind lang kitVersion layerRef modules db deploy port uiPort apiPort
   e2ePort apiDir uiDir dir registry deployHost deployDomain deployUser mysqlHost dbName databaseUrlExample rateLimitDefault
   services nuxtConfig
   usageSections`. Use the `*Json` forms inside source code — they are quoted and escaped.
 - No clock, no randomness, no environment lookups in a template or in `lib/compose.mjs`.
 - Conditional blocks: a line that is only a comment `@kit:if <terms>` / `@kit:else` / `@kit:end` (`//`, `#` or
   `<!-- -->` style) keeps or drops the lines in between; the directive lines never reach the project. Terms (all must
-  hold): a module name, `kind:<kind>`, `db:<db>`, `deploy:<preset>`, `sample`, each optionally negated with `!`. Blocks nest.
+  hold): a module name, `kind:<kind>`, `db:<db>`, `deploy:<preset>`, `sample`, `lang:<th|en>`, each optionally negated with `!`. Blocks nest.
   This is how ONE app-owned file (`src/app.ts`, `src/config.ts`, a test helper) serves every module combination —
   prefer it to a `when` variant whenever the file is text with comments. JSON files cannot hold a directive: they use
   `when` variants (`modules/api/variants/openapi.json` without auth, `modules/auth/variants/openapi.json` with it).
@@ -255,7 +261,8 @@ may name another part (`part: 'ui' | 'api' | 'project'`), and is skipped when th
 is computed before anything is written — all files and patches, or none; nothing outside the project. When several
 units provide the same type the later one wins (modules override the kind). A generator is pure like the rest of the
 kit: it runs no command, so derived files (`openapi.json`, the typed client) are regenerated by the commands in `next`.
-`lib/names.mjs` gives every spelling of a name (`order-lines` -> `OrderLine`, `order_lines`, …). A name whose
+`lib/names.mjs` gives every spelling of a name (`order-lines` -> `OrderLine`, `order_lines`, …); `lib/i18n.mjs` holds
+the words generated pages say, per language — a generator takes them with `text(langOf(manifest))`, never a literal. A name whose
 identifier would be a reserved word or shadow a built-in type (`delete`, `classes`, `errors`) is refused (exit 2,
 code `reserved_name`). `update` / `add` never write through a symlink that leaves the project (`path_escape`).
 
@@ -315,8 +322,9 @@ api       hono + @hono/zod-openapi (contract-first routes) · /api/v1 via mountV
           /openapi.json · `npm run contract` writes openapi.json and tests/contract.spec.ts fails when it differs from
           the code · src/resources/items/ = the example resource (list / get / create / update / soft delete, audited;
           left out with `--no-sample`)
-          · fullstack: the UI gets app/api/schema.d.ts (openapi-typescript), useApi() (openapi-fetch) and a
-          compile-time check of the typed client
+          · fullstack: the UI gets app/api/schema.d.ts (openapi-typescript), useApi() (openapi-fetch), a
+          compile-time check of the typed client, and the locked `app/utils/api-error.ts`: `apiProblem(error)` turns
+          the API's error body into one line with the trace id and — for a 400 — a message per field from `details`
 db        Kysely · SQLite through node:sqlite (built in — no native module) or MySQL through mysql2 · one migration
           set written with the schema builder, every migration reversible · base tables users / audit /
           service_tokens · standard columns id / createdAt / updatedAt / deletedAt, soft delete, audited() = the write

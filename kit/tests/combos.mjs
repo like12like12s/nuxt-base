@@ -10,6 +10,8 @@
 //   checks   extra async (t) => {} steps; `t` is the helper object documented in kit-gate.mjs
 //   db       with the db module: 'mysql' also runs the project's suite + built CLI on MySQL (kit-gate.mjs provides the server)
 //   sample   false = scaffold with --no-sample (no `items` example)
+//   lang     --lang value ('en'; the default th is what every other combo runs). Needs layer 'local' until the layer
+//            release that knows `nuxtBase.lang` is tagged.
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
@@ -406,7 +408,8 @@ export const combos = [
   { id: 'fullstack+full', kind: 'fullstack', with: ['db', 'auth', 'api', 'trace', 'og', 'security', 'jobs', 'notify'], e2e: true, checks: [fullModules] },
   { id: 'api+full+container', kind: 'api', with: ['auth', 'trace', 'security', 'jobs', 'notify'], db: 'sqlite', deploy: 'container', checks: [fullModules] },
   // --no-sample: no `items` example anywhere; the first resource comes from the generator
-  { id: 'fullstack+auth+no-sample', kind: 'fullstack', with: ['db', 'auth', 'api', 'og'], sample: false, e2e: true, checks: [noSample] },
+  // …in English (--lang en): the e2e suite asserts the generated pages AND the layer's labels are English
+  { id: 'fullstack+auth+no-sample+en', kind: 'fullstack', with: ['db', 'auth', 'api', 'og'], sample: false, lang: 'en', e2e: true, checks: [noSample] },
   { id: 'api+no-sample', kind: 'api', with: ['api', 'db'], sample: false, checks: [noSample] },
   // link previews on Cloudflare Pages: the e2e suite runs against wrangler's local Pages runtime, with crawler user agents
   { id: 'nuxt-app+og+auth+cf-pages', kind: 'nuxt-app', with: ['og', 'auth'], deploy: 'cf-pages', e2e: true },

@@ -1,16 +1,19 @@
 // `scaffold add page <name>` — a new route in the UI part: a page that follows the layer's
 // loading -> error -> empty -> content pattern (AsyncState) and an e2e spec that opens it and fails on any JS error.
 // Paths are relative to the UI part.
+import { langOf, text } from '../../../lib/i18n.mjs'
+
 const title = (name) => name.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ')
 
 export default function generate({ name, manifest }) {
   const auth = manifest.modules.includes('auth')
+  const t = text(langOf(manifest)) // the project's one UI language
   const page = `<template>
   <main class="mx-auto max-w-3xl space-y-6 p-6">
     <h1 class="text-xl font-semibold text-fg" data-test="title">${title(name)}</h1>
     <AsyncState :pending="pending" :error="error" :empty="!rows.length" :retry="load">
       <template #empty>
-        <EmptyState title="Nothing here yet" description="Replace this with the page content." />
+        <EmptyState title="${t.emptyTitle}" description="${t.emptyPage}" />
       </template>
       <Card>
         <ul class="divide-y divide-line">
@@ -55,7 +58,7 @@ ${auth ? "  await page.route('**/api/v1/me', (route) => route.fulfill({ json: { 
   await expect(page.getByTestId('title')).toHaveText('${title(name)}')
   await expect(page).toHaveTitle(/${title(name)}/)
   // nothing to show yet: the empty state, not a blank page
-  await expect(page.getByText('Nothing here yet')).toBeVisible()
+  await expect(page.getByText('${t.emptyTitle}')).toBeVisible()
   expect(errors).toEqual([])
 })
 `

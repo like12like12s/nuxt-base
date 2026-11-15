@@ -5,10 +5,17 @@
       <p class="text-sm text-muted">{{ site.description }}</p>
     </header>
     <Card>
+      <!-- @kit:if lang:en -->
       <p class="text-sm text-fg-2">Components, tokens and patterns come from the nuxt-base layer. Replace this page.</p>
       <div class="mt-4">
         <Btn data-test="hello" @click="toast.show('It works')">Say hello</Btn>
       </div>
+      <!-- @kit:else -->
+      <p class="text-sm text-fg-2">Component, token และ pattern มาจาก nuxt-base layer — แทนที่หน้านี้ด้วยหน้าของแอป</p>
+      <div class="mt-4">
+        <Btn data-test="hello" @click="toast.show('ใช้งานได้')">ทักทาย</Btn>
+      </div>
+      <!-- @kit:end -->
     </Card>
   </main>
 </template>

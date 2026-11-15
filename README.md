@@ -39,6 +39,9 @@ Measured: a consumer build with the peers installed takes ~6 s. `[ 'github:…',
   message + retry. `app/error.vue` default error page.
 - **Composables**: `useSiteHead({ title, description, image })` (title + OG/Twitter from `app.config.nuxtBase.site`;
   call it in `app.vue` — SPA mode needs client-side head). `useToast()` → `toast.show(msg)` + `<Toast :message="toast.message" />`.
+- **Language of the layer's own words**: `nuxtBase: { lang: 'th' | 'en' }` in `app/app.config.ts` (default `th`) —
+  loading, empty, error title, retry, confirm / cancel, the error page and `<html lang>` follow it; override single
+  entries with `nuxtBase.labels: { retry: '…' }`; read them yourself with `useLabels()`. One language per app.
 - **Auth hook point**: `useAuth()` → `{ user, ready, isAuthenticated, load, login }`. Off by default. Enable in
   `app/app.config.ts`: `nuxtBase: { auth: { enabled: true, loginUrl: '/outpost.goauthentik.io/start?rd={rd}' } }` — the
   layer's Nitro route `GET /api/_me` reads the `X-Authentik-*` headers Caddy forward-auth sets. Other schemes: ship your

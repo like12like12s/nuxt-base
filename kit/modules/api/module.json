@@ -116,6 +116,12 @@
           "openapi-typescript": "^7.13.0"
         }
       },
+      "locked": [
+        {
+          "from": "runtime/ui/api-error.ts",
+          "to": "app/utils/api-error.ts"
+        }
+      ],
       "files": [
         {
           "from": "files-ui",
