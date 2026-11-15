@@ -258,7 +258,7 @@ db        Kysely · SQLite through node:sqlite (built in — no native module) o
           and its audit row in one transaction · connect + statement deadlines, bounded retry on transient errors only
           (deadlock, lock wait, connection refused; a lost connection replays reads, never writes), withTransaction()
           replays a whole unit, the pool closes on shutdown · db:migrate up|down|status, db:seed (deterministic),
-          db:check (database == code; also what /health/ready asks) · backup before migrate: SQLite file copy, MySQL
+          db:check (database == code; also what /health/ready asks) · backup before migrate: SQLite verified snapshot (VACUUM INTO + integrity_check), MySQL
           DB_BACKUP_CMD hook or refusal · container preset: a `db-check` compose service gates the API container
 testkit   deterministic factories (seeded random, fixed clock, sequential ids) · one throwaway database per test file
           (SQLite temp file, or a MySQL `test_*` schema when TEST_MYSQL_URL is set) · in-process app client ·
@@ -293,8 +293,8 @@ security  `createApi({ middleware: security({…}) })`: secure headers (nosniff,
 og        per-URL title / description / og:* / twitter:* / canonical for crawlers: the SPA shell's <head> is rewritten
           in the server's HTML renderer (Nitro `render:html`), the same code on Node and on Cloudflare Pages. The
           app owns server/og.ts (URL -> meta, may be async, abandoned after 3 s, an error never breaks the page).
-jobs      src/jobs/<name>.ts + `npm run job -- <name>` / `node dist/jobs/run.js <name>`: a lock file per job (no
-          overlap; a dead owner or a passed deadline frees it), exit 0 ok · 1 failed · 2 unknown · 3 already running ·
+jobs      src/jobs/<name>.ts + `npm run job -- <name>` / `node dist/jobs/run.js <name>`: a lock per job (no
+          overlap, atomic across processes and hosts sharing JOB_LOCK_DIR; a dead owner or a passed deadline frees it), exit 0 ok · 1 failed · 2 unknown · 3 already running ·
           4 timed out, one JSON line at start and end, audit actor `job:<name>` and no audit row without a change.
           Nothing is scheduled: `add job` writes the scheduler entry for the operator.
 notify    client of a notification hub (`POST <NOTIFIER_URL>/notify`, bearer token): off without a URL, never throws,

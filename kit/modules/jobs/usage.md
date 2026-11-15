@@ -8,8 +8,10 @@ node dist/jobs/run.js <name>       # built / in the image
 ```
 
 - Exit codes, read by the scheduler: `0` ok · `1` failed · `2` unknown job · `3` already running (skipped) · `4` timed out.
-- A job cannot overlap itself: one lock file per job in `JOB_LOCK_DIR` (default `./data/locks`). A lock left by a
-  killed run is taken over once its owner is gone or its deadline (`timeoutMs` + 1 min) has passed.
+- A job cannot overlap itself: a lock per job in `JOB_LOCK_DIR` (default `./data/locks`, files `<name>.lock.<n>`) —
+  atomic between processes and between hosts that share the directory. A lock left by a killed run is superseded
+  once its owner is gone or its deadline (`timeoutMs` + 1 min) has passed. A run that timed out gives the lock back
+  only when the job function has stopped: honour `signal`, or the next start is refused (exit 3) until then.
 - Logs: one JSON line at the start, one at the end (`job`, `status`, `ms`, `changed`, whatever the job returns), with
   one `traceId` for the run.
 - Writes go through `audited()`: the audit actor is `job:<name>`, and a run that changes nothing writes no audit row —

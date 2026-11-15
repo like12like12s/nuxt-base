@@ -1,6 +1,8 @@
 // @vitest-environment node
 // The locked job runner (kit/runtime/jobs/runner.ts) and the notify client (kit/runtime/notify/client.ts) at the source.
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { createLogger } from '../runtime/api/log'
@@ -10,7 +12,7 @@ import { baseMigration, type BaseTables } from '../runtime/db/schema'
 import { JOB_EXIT, acquireLock, defineJob, runJob, runJobsCli, type Job } from '../runtime/jobs/runner'
 import { createNotifier } from '../runtime/notify/client'
 import { createTestDb, type TestDb } from '../runtime/testing/test-db'
-import { cleanup, tmp } from './helpers'
+import { KIT_ROOT, cleanup, tmp } from './helpers'
 
 const migrations: Migrations = { '0001_base': baseMigration }
 const open: TestDb<any>[] = []
@@ -69,8 +71,60 @@ describe('lock — a job cannot overlap itself', () => {
     old.release() // the old run finishes late: it must not free the new run's lock
     expect(JSON.parse(readFileSync(next.file, 'utf8')).pid).toBe(222)
     writeFileSync(join(dir, 'broken.lock'), '{not json')
-    expect(acquireLock(dir, 'broken', { ttlMs: 1000 })).not.toBeNull()
+    // unreadable = perhaps being written by another version of the runner: honoured for a grace period, then stale
+    expect(acquireLock(dir, 'broken', { ttlMs: 1000 })).toBeNull()
+    expect(acquireLock(dir, 'broken', { ttlMs: 1000, graceMs: -1 })).not.toBeNull()
+    expect(readdirSync(dir).filter((f) => f.startsWith('broken'))).toEqual(['broken.lock.1'])
   })
+
+  it('a contender that finds a lock it did not judge backs off without touching it', () => {
+    const dir = tmp('lock')
+    // generation 7 appears between "list" and "confirm" of a contender that saw an empty directory: simulated by a
+    // live lock of another host at a generation the contender does not expect
+    const live = JSON.stringify({ pid: 1, host: 'elsewhere', startedAt: 'x', expiresAt: new Date(Date.now() + 60_000).toISOString(), nonce: 'n' })
+    writeFileSync(join(dir, 'sync.lock.7'), live)
+    expect(acquireLock(dir, 'sync', { ttlMs: 1000 })).toBeNull()
+    expect(readdirSync(dir)).toEqual(['sync.lock.7'])
+    expect(readFileSync(join(dir, 'sync.lock.7'), 'utf8')).toBe(live)
+  })
+})
+
+// H3 (review t1097): many instances started by the same scheduler tick, on a shared lock volume. Real processes —
+// the races are between a contender's read of the lock and another contender's write.
+describe('lock — races between processes', () => {
+  const LOCK_MODULE = join(KIT_ROOT, 'runtime', 'jobs', 'lock.ts')
+  const CHILD = join(KIT_ROOT, 'tests', 'fixtures', 'lock-race.mjs')
+  const DEAD_PID = 2 ** 22 + 12345 // above the kernel's pid_max: never a live process
+
+  async function round(prepare: (dir: string) => void, contenders = 12, holdMs = 150) {
+    const dir = tmp('race')
+    const log = join(dir, 'holders.log')
+    prepare(dir)
+    const at = Date.now() + 700
+    const exits = await Promise.all(Array.from({ length: contenders }, () => new Promise<number | null>((resolve) => {
+      const child = spawn(process.execPath, [CHILD, process.env.KIT_LOCK_MODULE ?? LOCK_MODULE, dir, String(at), log, String(holdMs)], { stdio: 'ignore' })
+      child.on('close', (code) => resolve(code))
+    })))
+    expect(exits.every((code) => code === 0), `child exit codes ${exits.join(',')}`).toBe(true)
+    const holders = existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').map((line) => line.split(' ').map(Number)) : []
+    const overlapping = holders.filter(([pid, from, to]) => holders.some(([other, f, t]) => other !== pid && f! < to! && from! < t!)).length
+    return { holders: holders.length, overlapping, left: readdirSync(dir).filter((f) => f !== 'holders.log') }
+  }
+
+  it('a stale lock (dead owner) is taken over by exactly one of 12 simultaneous starts', async () => {
+    const stale = JSON.stringify({ pid: DEAD_PID, host: hostname(), startedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 600_000).toISOString() })
+    const rounds = []
+    for (let i = 0; i < 6; i++) rounds.push(await round((dir) => writeFileSync(join(dir, 'race.lock'), stale)))
+    expect(rounds.map((r) => r.holders)).toEqual([1, 1, 1, 1, 1, 1])
+    expect(rounds.flatMap((r) => r.left)).toEqual([]) // the stale lock, the winner's lock and every temp file are gone
+  }, 60_000)
+
+  it('with no lock at all, exactly one of 12 simultaneous starts runs', async () => {
+    const rounds = []
+    for (let i = 0; i < 4; i++) rounds.push(await round(() => undefined))
+    expect(rounds.map((r) => r.holders)).toEqual([1, 1, 1, 1])
+    expect(rounds.flatMap((r) => r.left)).toEqual([])
+  }, 60_000)
 })
 
 describe('runJob', () => {
@@ -84,7 +138,7 @@ describe('runJob', () => {
     // one trace id for the whole run, on every line
     expect(new Set(t.lines.map((l) => l.traceId)).size).toBe(1)
     expect(t.lines[0]!.traceId).toMatch(/^[0-9a-f]{32}$/)
-    expect(existsSync(join(t.lockDir, 'sync.lock'))).toBe(false)
+    expect(readdirSync(t.lockDir)).toEqual([])
     expect(await t.run(job)).toBe(JOB_EXIT.OK) // and can run again
   })
 
@@ -92,7 +146,7 @@ describe('runJob', () => {
     const t = await setup()
     expect(await t.run(defineJob({ name: 'boom', run: async () => { throw new Error('upstream is down') } }))).toBe(JOB_EXIT.FAILED)
     expect(t.lines.at(-1)).toMatchObject({ level: 'error', msg: 'job end', job: 'boom', status: 'failed', error: 'upstream is down' })
-    expect(existsSync(join(t.lockDir, 'boom.lock'))).toBe(false)
+    expect(readdirSync(t.lockDir)).toEqual([])
   })
 
   it('overlap: a second start while the first runs exits 3 and does not run', async () => {
@@ -111,14 +165,34 @@ describe('runJob', () => {
     expect(runs).toBe(2)
   })
 
-  it('timeout: exit 4, the job is told through its signal, the lock is released', async () => {
+  it('timeout: exit 4, the job is told through its signal; the lock is released once the job has stopped', async () => {
+    const t = await setup()
+    const job = defineJob({ name: 'obedient', timeoutMs: 30, run: ({ signal }) => new Promise<void>((_, reject) => { signal.addEventListener('abort', () => reject(new Error('stopped'))) }) })
+    expect(await t.run(job)).toBe(JOB_EXIT.TIMEOUT)
+    expect(t.lines.at(-1)).toMatchObject({ level: 'error', status: 'timeout', timeoutMs: 30, stopped: true })
+    expect(readdirSync(t.lockDir)).toEqual([])
+  })
+
+  // L4: releasing the lock while the timed-out job function is still running would let the next run start next to it
+  it('timeout: a job that ignores the signal keeps the lock — the next start is refused while it may still be working', async () => {
     const t = await setup()
     let aborted = false
     const job = defineJob({ name: 'stuck', timeoutMs: 30, run: ({ signal }) => new Promise<void>(() => { signal.addEventListener('abort', () => { aborted = true }) }) })
-    expect(await t.run(job)).toBe(JOB_EXIT.TIMEOUT)
+    expect(await t.run(job, { abortGraceMs: 20 })).toBe(JOB_EXIT.TIMEOUT)
     expect(aborted).toBe(true)
-    expect(t.lines.at(-1)).toMatchObject({ level: 'error', status: 'timeout', timeoutMs: 30 })
-    expect(existsSync(join(t.lockDir, 'stuck.lock'))).toBe(false)
+    expect(t.lines.at(-1)).toMatchObject({ level: 'error', status: 'timeout', stopped: false })
+    expect(readdirSync(t.lockDir)).toEqual(['stuck.lock.1'])
+    expect(await t.run(job, { abortGraceMs: 20 })).toBe(JOB_EXIT.LOCKED)
+    // once the process is gone (or the deadline has passed) the lock is superseded
+    expect(await t.run(defineJob({ name: 'stuck', run: async () => undefined }), { lock: { isAlive: () => false } })).toBe(JOB_EXIT.OK)
+    expect(readdirSync(t.lockDir)).toEqual([])
+  })
+
+  it('what a job returns cannot replace the standard fields of its end line', async () => {
+    const t = await setup()
+    expect(await t.run(defineJob({ name: 'liar', run: async () => ({ status: 'failed', job: 'other', ms: -1, changed: 2 }) }))).toBe(JOB_EXIT.OK)
+    expect(t.lines.at(-1)).toMatchObject({ job: 'liar', status: 'ok', changed: 2 })
+    expect(t.lines.at(-1)!.ms).toBeGreaterThanOrEqual(0)
   })
 
   it('audit only on change: the actor is the job, and a run that changes nothing writes no row', async () => {
@@ -161,7 +235,7 @@ describe('runner cli', () => {
     expect(ran).toEqual(['b'])
     expect(await cli('--list')).toBe(0)
     expect(out).toEqual(['a  — first', 'b'])
-    for (const bad of [[], ['nope'], ['a', 'extra'], ['--list', 'x']]) expect(await cli(...bad), bad.join(' ')).toBe(JOB_EXIT.USAGE)
+    for (const bad of [[], ['nope'], ['a', 'extra'], ['--list', 'x'], ['constructor'], ['__proto__'], ['toString']]) expect(await cli(...bad), bad.join(' ')).toBe(JOB_EXIT.USAGE)
     expect(out.at(-1)).toContain('jobs: a, b')
     expect(ran).toEqual(['b'])
   })

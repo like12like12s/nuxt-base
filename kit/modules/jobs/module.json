@@ -15,7 +15,10 @@
         { "key": "JOB_LOCK_DIR", "required": false, "secret": false, "example": "./data/locks", "description": "Where running jobs keep their lock file (a volume every instance shares)" }
       ],
       "files": [{ "from": "files", "to": "" }],
-      "locked": [{ "from": "runtime/jobs/runner.ts", "to": "src/kit/jobs/runner.ts" }],
+      "locked": [
+        { "from": "runtime/jobs/runner.ts", "to": "src/kit/jobs/runner.ts" },
+        { "from": "runtime/jobs/lock.ts", "to": "src/kit/jobs/lock.ts" }
+      ],
       "usage": "usage.md"
     },
     "project": {
