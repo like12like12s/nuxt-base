@@ -19,6 +19,14 @@ import { now } from './clock.js'
 import { openDatabase, type Database, type DatabaseOptions } from './connect.js'
 import { appliedMigrations, backupSqlite, describeSchema, migrateDown, migrateUp, schemaState, type Migrations } from './migrate.js'
 
+// DB_BACKUP_CMD is a command line the OPERATOR configures (`mysqldump … | gzip > …`): a shell is what it is written
+// for, so one is started explicitly and given the line as a single argument (no shell option on the spawn call), and nothing from a
+// request ever reaches this (the value comes from the process environment at deploy time only).
+export function runShellCommand(commandLine: string): number {
+  const [shell, flag] = process.platform === 'win32' ? [process.env.ComSpec ?? 'cmd.exe', '/c'] : ['/bin/sh', '-c']
+  return spawnSync(shell, [flag, commandLine], { stdio: 'inherit' }).status ?? 1
+}
+
 export interface DbCliDeps {
   /** DATABASE_URL */
   url: string
@@ -71,7 +79,7 @@ export async function runDbCli(argv: readonly string[], deps: DbCliDeps): Promis
       out('REFUSED: no backup before migrating MySQL. Set DB_BACKUP_CMD to your dump command, or pass --no-backup (DB_MIGRATE_NO_BACKUP=1) when a backup was taken another way.')
       return false
     }
-    const code = (deps.runBackupCommand ?? ((cmd) => spawnSync(cmd, { shell: true, stdio: 'inherit' }).status ?? 1))(hook)
+    const code = (deps.runBackupCommand ?? runShellCommand)(hook)
     if (code !== 0) {
       out(`REFUSED: DB_BACKUP_CMD exited ${code} — not migrating`)
       return false

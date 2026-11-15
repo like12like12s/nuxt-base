@@ -357,6 +357,17 @@ pm2         ecosystem.config.cjs (time: true, ports in env only). Nothing is sta
             starting it through the Pilot API.
 ```
 
+### Dependency ranges and scanner findings
+
+The ranges in `kinds/*/kind.json` and `modules/*/module.json` are what every new project starts with — refresh them
+with `npm view <pkg> version`, never from memory. A fresh project must have no `npm audit` finding of severity
+moderate or higher (a step of the kit gate, per directory with a lockfile; `--no-audit` skips it when the registry's
+advisory service is unreachable). Where the fix is only in a transitive dependency whose parent has not released it,
+the UI's `package.json` carries a narrow `overrides` entry (today: `minimatch` under `editorconfig` / `readdir-glob`,
+`glob` under `js-beautify`) — drop an entry as soon as the parent's own range reaches the fixed version.
+Static-analysis findings in locked files are fixed in the kit, or suppressed on the line with the reason next to it
+(`// nosemgrep: <rule id>`): an app cannot edit a locked file, so a finding there is the kit's to answer.
+
 A preset on a kind it does not support (`cf-pages` on `api` / `fullstack`) is exit 4.
 
 ## Testing the kit

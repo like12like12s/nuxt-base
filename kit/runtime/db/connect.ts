@@ -3,7 +3,7 @@
 //
 // One way to open the database. DATABASE_URL selects the dialect at run time:
 //   sqlite:./data/app.db · sqlite:/abs/path/app.db · sqlite::memory:
-//   mysql://<user>:<password>@<host>:3306/<database>
+//   mysql://<user>:<password>@<host>:3306/<database>          add ?ssl=true for TLS (the server certificate is verified)
 // No error raised here ever contains the URL — it may hold a password.
 import { Kysely, sql, type Dialect } from 'kysely'
 import { mysqlDialect } from './mysql.js'
@@ -14,7 +14,7 @@ export type DialectName = 'sqlite' | 'mysql'
 
 export type DatabaseTarget =
   | { dialect: 'sqlite'; file: string }
-  | { dialect: 'mysql'; host: string; port: number; user: string; password: string; database: string }
+  | { dialect: 'mysql'; host: string; port: number; user: string; password: string; database: string; ssl?: true }
 
 export function parseDatabaseUrl(url: string): DatabaseTarget {
   if (url.startsWith('sqlite:')) {
@@ -31,6 +31,15 @@ export function parseDatabaseUrl(url: string): DatabaseTarget {
     }
     const database = decodeURIComponent(parsed.pathname.replace(/^\//, ''))
     if (!parsed.hostname || !database) throw new Error('DATABASE_URL: mysql needs a host and a database name (mysql://<user>:<password>@<host>:3306/<database>)')
+    // TLS is asked for in the URL: `?ssl=true` (or 1 / required). Anything else after `?` is refused — a typo must not
+    // silently mean "no TLS".
+    const params = [...parsed.searchParams.keys()]
+    const tls = parsed.searchParams.get('ssl')
+    if (params.some((key) => key !== 'ssl') || (tls !== null && !['true', '1', 'required', 'false', '0'].includes(tls))) {
+      throw new Error('DATABASE_URL: the only option a mysql:// URL takes is ?ssl=true')
+    }
+    // Not a Sequelize config (the rule below matches the shape): this is the parsed DATABASE_URL, and TLS is the `ssl` flag.
+    // nosemgrep: javascript.sequelize.security.audit.sequelize-enforce-tls.sequelize-enforce-tls
     return {
       dialect: 'mysql',
       host: parsed.hostname,
@@ -38,6 +47,7 @@ export function parseDatabaseUrl(url: string): DatabaseTarget {
       user: decodeURIComponent(parsed.username),
       password: decodeURIComponent(parsed.password),
       database,
+      ...(tls !== null && ['true', '1', 'required'].includes(tls) ? { ssl: true as const } : {}),
     }
   }
   throw new Error('DATABASE_URL: unsupported scheme — use sqlite: or mysql://')

@@ -16,6 +16,8 @@ export interface MysqlOptions {
   user: string
   password: string
   database: string
+  /** TLS to the server, certificate verified (DATABASE_URL `?ssl=true`). */
+  ssl?: boolean
   /** TCP connect + handshake, and waiting for a free pooled connection. */
   connectTimeoutMs: number
   queryTimeoutMs: number
@@ -95,7 +97,10 @@ export function wrapPool(pool: Pool, options: Pick<MysqlOptions, 'connectTimeout
 }
 
 export function mysqlDialect(options: MysqlOptions) {
+  // `{}` = TLS with node's defaults: the server certificate must verify against the system CAs.
+  const tls = options.ssl ? { ssl: {} } : {}
   const pool = createPool({
+    ...tls,
     host: options.host,
     port: options.port,
     user: options.user,
@@ -112,7 +117,7 @@ export function mysqlDialect(options: MysqlOptions) {
   })
   // Not through the pool: it may be exhausted by the very statements that are being killed.
   const kill = (threadId: number) => {
-    const side = createConnection({ host: options.host, port: options.port, user: options.user, password: options.password, connectTimeout: options.connectTimeoutMs })
+    const side = createConnection({ ...tls, host: options.host, port: options.port, user: options.user, password: options.password, connectTimeout: options.connectTimeoutMs })
     const giveUp = setTimeout(() => side.destroy(), options.connectTimeoutMs + 2000)
     side.on('error', () => undefined) // best effort: the QUERY_TIMEOUT error is what the caller sees
     side.query(`KILL ${Math.trunc(threadId)}`, () => {

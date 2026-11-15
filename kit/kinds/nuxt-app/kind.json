@@ -54,6 +54,17 @@
           "vitest": "^5.1.0",
           "vue-tsc": "^3.2.0",
           "oxlint": "^1.93.0"
+        },
+        "overrides": {
+          "editorconfig": {
+            "minimatch": "^11.0.8"
+          },
+          "readdir-glob": {
+            "minimatch": "^11.0.8"
+          },
+          "js-beautify": {
+            "glob": "^14.0.6"
+          }
         }
       },
       "env": [

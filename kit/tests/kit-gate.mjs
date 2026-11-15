@@ -7,7 +7,7 @@
 // when docker is available, else a loud NOTICE … SKIPPED. The data-layer unit tests of the kit run there too.
 // Slow by design (installs, builds); the fast unit tests of the generator live in kit/tests/*.spec.ts (`npm run gate`).
 //
-//   node kit/tests/kit-gate.mjs [--only <text>] [--concurrency N] [--keep] [--no-docker] [--no-e2e] [--layer-ref <ref>] [--list]
+//   node kit/tests/kit-gate.mjs [--only <text>] [--concurrency N] [--keep] [--no-docker] [--no-e2e] [--no-audit] [--layer-ref <ref>] [--list]
 //
 // Re-runnable: every run uses new temp dirs and removes them (and any image / container it created) on exit, also
 // after a failure or Ctrl-C. `--keep` leaves the dirs for inspection. Starts nothing outside its own child processes.
@@ -26,7 +26,7 @@ const BIN = join(KIT, 'bin', 'scaffold.mjs')
 const { values: flags } = parseArgs({
   options: {
     only: { type: 'string' }, concurrency: { type: 'string' }, keep: { type: 'boolean' }, 'no-docker': { type: 'boolean' },
-    'no-e2e': { type: 'boolean' }, 'layer-ref': { type: 'string' }, list: { type: 'boolean' },
+    'no-e2e': { type: 'boolean' }, 'no-audit': { type: 'boolean' }, 'layer-ref': { type: 'string' }, list: { type: 'boolean' },
   },
 })
 
@@ -262,6 +262,15 @@ async function gateCombo(combo, index) {
 
     begin('npm install')
     await run(log, 'npm', ['install', '--no-audit', '--no-fund'], { cwd: dir, timeout: 900_000 })
+    // A fresh project starts without a known moderate+ advisory in what the kit pins (the project's own gate:ci
+    // fails on high; this is the kit keeping its ranges and overrides current). --no-audit: registry unreachable.
+    if (!flags['no-audit']) {
+      for (const part of [dir, ...new Set([apiDir, uiDir].filter((d) => d && d !== dir))]) {
+        if (!existsSync(join(part, 'package-lock.json'))) continue
+        begin(`npm audit --audit-level=moderate (${part === dir ? '.' : part.slice(dir.length + 1)})`)
+        await run(log, 'npm', ['audit', '--audit-level=moderate'], { cwd: part, timeout: 120_000 })
+      }
+    }
     begin(onMysql ? 'npm run gate (test suite on MySQL)' : 'npm run gate')
     const gated = await run(log, 'npm', ['run', 'gate'], { cwd: dir, timeout: 300_000, extraEnv: onMysql ? { TEST_MYSQL_URL: mysqlUrl } : {} })
     if (onMysql && /SKIPPED/.test(gated.out)) throw new StepError('the suite printed a SKIPPED notice although TEST_MYSQL_URL was set')

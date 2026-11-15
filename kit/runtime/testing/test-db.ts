@@ -45,7 +45,10 @@ export interface TestDb<DB> extends Database<DB> {
   cleanup(): Promise<void>
 }
 
-async function mysqlAdmin<T>(serverUrl: string, fn: (query: (statement: string) => Promise<unknown>) => Promise<T>): Promise<T> {
+// Create or drop ONE schema on the test server. The statement is a constant and the name goes in as an escaped
+// identifier (`??`), after the check that it is named like a test schema — nothing else can be created or dropped.
+async function mysqlAdmin(serverUrl: string, action: 'create' | 'drop', schema: string): Promise<void> {
+  if (!TEST_SCHEMA.test(schema)) throw new Error(`refusing to ${action} schema "${schema}" — test schemas are named test_*`)
   const url = new URL(serverUrl)
   const connection = await createConnection({
     host: url.hostname,
@@ -55,7 +58,8 @@ async function mysqlAdmin<T>(serverUrl: string, fn: (query: (statement: string) 
     connectTimeout: 5000,
   })
   try {
-    return await fn((statement) => connection.query(statement))
+    if (action === 'create') await connection.query('CREATE DATABASE ?? CHARACTER SET utf8mb4', [schema])
+    else await connection.query('DROP DATABASE IF EXISTS ??', [schema])
   } finally {
     await connection.end()
   }
@@ -70,15 +74,13 @@ export async function createTestDb<DB = any>(options: TestDbOptions = {}): Promi
 
   if (server) {
     const schema = `test_${label}_${randomBytes(6).toString('hex')}`
-    if (!TEST_SCHEMA.test(schema)) throw new Error(`refusing to create schema "${schema}" — test schemas are named test_*`)
-    await mysqlAdmin(server, (query) => query(`CREATE DATABASE \`${schema}\` CHARACTER SET utf8mb4`))
+    await mysqlAdmin(server, 'create', schema)
     const target = new URL(server)
     target.pathname = `/${schema}`
     url = target.toString()
     remove = async () => {
-      // Belt and braces: only ever drop the schema created above, and only if it is named like a test schema.
-      if (!TEST_SCHEMA.test(schema)) throw new Error(`refusing to drop "${schema}"`)
-      await mysqlAdmin(server, (query) => query(`DROP DATABASE IF EXISTS \`${schema}\``))
+      // Only ever the schema created above — and mysqlAdmin refuses a name that is not a test schema's.
+      await mysqlAdmin(server, 'drop', schema)
     }
   } else {
     const dir = mkdtempSync(join(tmpdir(), `kit-test-${label}-`))

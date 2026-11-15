@@ -134,6 +134,20 @@ describe('new — e2e port', () => {
   })
 })
 
+// Finding #12: `npm audit` of a fresh UI reported 8 moderate advisories (minimatch, glob) through packages whose
+// parents have not released a fix. The override is narrow on purpose — only under the three parents that need it.
+describe('new — dependency overrides of the UI', () => {
+  it('the UI pins the fixed minimatch / glob under the parents that still ask for a vulnerable range, and nothing wider', () => {
+    for (const [kind, file] of [['nuxt-app', 'package.json'], ['fullstack', 'ui/package.json']] as const) {
+      const pkg = JSON.parse(read(scaffold(['--kind', kind]).dir, file))
+      expect(pkg.overrides, kind).toEqual({ editorconfig: { minimatch: '^11.0.8' }, 'readdir-glob': { minimatch: '^11.0.8' }, 'js-beautify': { glob: '^14.0.6' } })
+    }
+    const fullstack = scaffold(['--kind', 'fullstack']).dir
+    expect(JSON.parse(read(fullstack, 'api/package.json')).overrides).toBeUndefined()
+    expect(JSON.parse(read(fullstack, 'package.json')).overrides).toBeUndefined()
+  })
+})
+
 describe('new — deploy presets and CI', () => {
   it('cf-pages: nitro preset + wrangler scripts', () => {
     const { dir } = scaffold(['--kind', 'nuxt-app', '--deploy', 'cf-pages'])

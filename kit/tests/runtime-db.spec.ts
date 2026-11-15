@@ -1,14 +1,15 @@
 // @vitest-environment node
 // The locked data layer (kit/runtime/db/**) at the source. Everything dialect-dependent runs on SQLite always and on
 // MySQL when TEST_MYSQL_URL points at a server where `test_*` schemas may be created (the kit gate provides one).
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { sql, type CompiledQuery, type DatabaseConnection, type Dialect, type Driver, type GeneratedAlways, type Kysely } from 'kysely'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { runWithContext } from '../runtime/api/context'
 import { databaseChecks } from '../runtime/db/checks'
-import { runDbCli } from '../runtime/db/cli'
+import { runDbCli, runShellCommand } from '../runtime/db/cli'
 import { newId, now, setClock, setIdGenerator } from '../runtime/db/clock'
 import { openDatabase, parseDatabaseUrl } from '../runtime/db/connect'
 import { appliedMigrations, backupSqlite, verifySqliteFile, migrateDown, migrateReset, migrateUp, schemaState, type Migrations } from '../runtime/db/migrate'
@@ -136,6 +137,13 @@ describe('DATABASE_URL', () => {
     expect(parseDatabaseUrl('sqlite:/var/data/app.db')).toEqual({ dialect: 'sqlite', file: '/var/data/app.db' })
     expect(parseDatabaseUrl('sqlite::memory:')).toEqual({ dialect: 'sqlite', file: ':memory:' })
     expect(parseDatabaseUrl(mysqlUrl)).toEqual({ dialect: 'mysql', host: 'db.internal', port: 3307, user: 'app', password: 'p@ss', database: 'shop_db' })
+    // TLS is opt-in through the URL, and nothing else may ride along (a typo must not quietly mean "no TLS")
+    for (const on of ['true', '1', 'required']) expect(parseDatabaseUrl(`${mysqlUrl}?ssl=${on}`)).toMatchObject({ dialect: 'mysql', database: 'shop_db', ssl: true })
+    for (const off of ['false', '0']) expect(parseDatabaseUrl(`${mysqlUrl}?ssl=${off}`)).not.toHaveProperty('ssl')
+    for (const bad of ['?ssl=yes', '?sslmode=require', '?ssl=true&x=1', '?tls=true']) {
+      expect(() => parseDatabaseUrl(mysqlUrl + bad), bad).toThrow('the only option a mysql:// URL takes is ?ssl=true')
+      try { parseDatabaseUrl(mysqlUrl + bad) } catch (e) { expect((e as Error).message).not.toContain('p@ss') }
+    }
     expect(parseDatabaseUrl(mysqlUrl.replace(':3307', ''))).toMatchObject({ port: 3306 })
   })
 
@@ -534,6 +542,34 @@ describe('transient errors — what is retried and what is not', () => {
     } finally {
       await database.close()
     }
+  })
+})
+
+// Finding #12 (semgrep spawn-shell-true): the backup hook is started as an explicit shell with the command line as one
+// argument. It is still a shell command line — pipes, &&, variables — because that is what an operator writes.
+describe('DB_BACKUP_CMD runner', () => {
+  it('runs the configured command line in a shell and returns its exit code', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-test-hook-'))
+    try {
+      const out = join(dir, 'dump.txt')
+      const before = process.env.KIT_TEST_HOOK_OUT
+      process.env.KIT_TEST_HOOK_OUT = out
+      try {
+        expect(runShellCommand('printf dump | tr a-z A-Z > "$KIT_TEST_HOOK_OUT" && test -s "$KIT_TEST_HOOK_OUT"')).toBe(0)
+      } finally {
+        if (before === undefined) delete process.env.KIT_TEST_HOOK_OUT
+        else process.env.KIT_TEST_HOOK_OUT = before
+      }
+      expect(readFileSync(out, 'utf8')).toBe('DUMP')
+      expect(runShellCommand('exit 7')).toBe(7)
+      expect(runShellCommand('no-such-command-kit-test 2>/dev/null')).toBe(127)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('the locked runtime starts no process with `shell: true`', () => {
+    for (const file of ['db/cli.ts', 'db/migrate.ts', 'jobs/runner.ts', 'jobs/lock.ts']) expect(readFileSync(join(__dirname, '../runtime', file), 'utf8'), file).not.toMatch(/shell:\s*true/)
   })
 })
 
