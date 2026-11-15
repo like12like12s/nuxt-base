@@ -145,7 +145,7 @@ describe('rate limit', () => {
       const hit = async (peer: string, headers: Record<string, string> = {}) => (await api.request('/x', { headers }, { incoming: { socket: { remoteAddress: peer } } })).status
       return { hit, shared }
     }
-    const PROXY = '10.0.0.5'
+    const PROXY = '198.51.100.5' // documentation range (TEST-NET-2)
     const via = (client: string, extra: Record<string, string> = {}) => ({ 'x-forwarded-for': client, 'x-auth-proxy-secret': SECRET, ...extra })
 
     it('many clients behind one trusted proxy each have their own budget — one noisy client does not lock the others out', async () => {
@@ -177,10 +177,10 @@ describe('rate limit', () => {
     })
 
     it('a trusted source list uses the TCP peer; with both configured both must hold', async () => {
-      const byAddress = behind({ trustedProxies: '10.0.0.0/24, ::1' }, 1)
-      expect([await byAddress.hit(PROXY, { 'x-forwarded-for': '203.0.113.1' }), await byAddress.hit('::ffff:10.0.0.5', { 'x-forwarded-for': '203.0.113.2' })]).toEqual([200, 200])
+      const byAddress = behind({ trustedProxies: '198.51.100.0/24, ::1' }, 1)
+      expect([await byAddress.hit(PROXY, { 'x-forwarded-for': '203.0.113.1' }), await byAddress.hit('::ffff:198.51.100.5', { 'x-forwarded-for': '203.0.113.2' })]).toEqual([200, 200])
       expect([await byAddress.hit('192.0.2.1', { 'x-forwarded-for': '203.0.113.3' }), await byAddress.hit('192.0.2.1', { 'x-forwarded-for': '203.0.113.4' })]).toEqual([200, 429])
-      const both = behind({ secret: SECRET, trustedProxies: ['10.0.0.5'] }, 1)
+      const both = behind({ secret: SECRET, trustedProxies: [PROXY] }, 1)
       expect([await both.hit('192.0.2.1', via('203.0.113.1')), await both.hit('192.0.2.1', via('203.0.113.2'))]).toEqual([200, 429]) // right secret, wrong peer
       expect([await both.hit(PROXY, via('203.0.113.1')), await both.hit(PROXY, via('203.0.113.2'))]).toEqual([200, 200])
       expect(() => rateLimit({ max: 1, windowMs: 1000, trust: { trustedProxies: 'not-an-address' } })).toThrow(SecurityConfigError)

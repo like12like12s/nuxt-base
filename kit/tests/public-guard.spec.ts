@@ -1,7 +1,8 @@
 // @vitest-environment node
 // nuxt-base is a PUBLIC repo and the kit's output lands in other repos: nothing under kit/ may carry an internal
 // address, an internal hostname or anything shaped like a credential. Infra values arrive at run time via --context.
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { KIT_ROOT } from './helpers'
@@ -23,6 +24,13 @@ const RULES: [string, RegExp][] = [
   ['password in URL', /[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"`]+:[^\s/@'"`$<{]+@(?!db\.test)/i],
 ]
 
+// Internal service names that are not shaped like the host aliases above. Assembled at run time: this file is scanned too.
+RULES.push(['internal service alias', new RegExp(`\\b(${[['mysql', 'central'], ['mssql', 'dev'], ['litellm', 'pg']].map((parts) => parts.join('-')).join('|')})\\b`)])
+
+// Values that look like secrets and are public by nature: the commit SHA an action is pinned to, the published
+// checksum of a release. Only in exactly these positions.
+const PUBLIC_PINS = [/(uses: [\w.-]+\/[\w./-]+@)[0-9a-f]{40}\b/g, /(\b[A-Z][A-Z0-9_]*_SHA256: )[0-9a-f]{64}\b/g]
+
 function files(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const abs = join(dir, name)
@@ -34,7 +42,8 @@ function files(dir: string, out: string[] = []): string[] {
 
 export function violations(text: string): string[] {
   const hits: string[] = []
-  text.split('\n').forEach((line, i) => {
+  text.split('\n').forEach((raw, i) => {
+    const line = PUBLIC_PINS.reduce((text, pin) => text.replace(pin, '$1<pinned>'), raw)
     for (const [label, re] of RULES) if (re.test(line)) hits.push(`${i + 1}: ${label}`)
   })
   return hits
@@ -48,12 +57,15 @@ describe('public-repo guard', () => {
       `https://app${'.int.'}example.xyz/`, `ssh ${'lxc'}-project`, `-----BEGIN OPENSSH ${'PRIVATE'} KEY-----`,
       `${'ghp'}_${'a1B2'.repeat(9)}`, `${'sk'}-${'a1B2c3'.repeat(5)}`, `${'AKIA'}${'ABCDEFGH12345678'}`,
       `Authorization: ${'Bearer'} ${'abcDEF123456'.repeat(2)}`, `${'0123456789abcdef'.repeat(3)}`,
-      `mysql://root:${'hunter2'}@db.example.com/app`,
+      `mysql://root:${'hunter2'}@db.example.com/app`, `the ${['mysql', 'central'].join('-')} server`,
+      // a pin is only public in its own position — the same value anywhere else is still flagged
+      `token: ${'0123456789abcdef'.repeat(4)}`, `uses: ${'0123456789abcdef'.repeat(3)}`,
     ]) expect(violations(bad), bad).not.toEqual([])
     for (const ok of [
       'http://127.0.0.1:3000/health/live', 'HOST=0.0.0.0', '"nuxt": "^4.6.4"', 'version 10.2.1', 'registry.example.com',
       'github:like12like12s/nuxt-base#v0.1.3', 'authorization: Bearer $PILOT_TOKEN', 'https://demo-app.example.com/',
-      'print(int.parse(x))',
+      'print(int.parse(x))', `      - uses: actions/checkout@${'0123456789abcdef'.repeat(2)}${'01234567'} # v7.0.1`, `      GITLEAKS_SHA256: ${'0123456789abcdef'.repeat(4)} # release checksum`,
+      'the central dev MySQL', 'api+std-mysql',
     ]) expect(violations(ok), ok).toEqual([])
   })
 
@@ -62,6 +74,21 @@ describe('public-repo guard', () => {
     const all = files(KIT_ROOT)
     expect(all.length).toBeGreaterThan(40)
     for (const abs of all) for (const hit of violations(readFileSync(abs, 'utf8'))) found.push(`${relative(KIT_ROOT, abs)}:${hit}`)
+    expect(found).toEqual([])
+  })
+
+  // L15: the repo is public as a whole — its own docs (README, the tracked .memory/ changelog and guides) and its CI
+  // workflow are held to the same rules as kit/.
+  it('nothing else this repo publishes does either: README.md, tracked .memory/ and .github/', () => {
+    const repo = join(KIT_ROOT, '..')
+    const tracked = spawnSync('git', ['-C', repo, 'ls-files', '-z', 'README.md', '.memory', '.github'], { encoding: 'utf8' }).stdout.split('\0').filter(Boolean)
+    expect(tracked).toContain('README.md')
+    expect(tracked.some((file) => file.startsWith('.memory/docs/changelog/'))).toBe(true)
+    const found: string[] = []
+    for (const file of tracked) {
+      if (!existsSync(join(repo, file))) continue // deleted in the working tree
+      for (const hit of violations(readFileSync(join(repo, file), 'utf8'))) found.push(`${file}:${hit}`)
+    }
     expect(found).toEqual([])
   })
 

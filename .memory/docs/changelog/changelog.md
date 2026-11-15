@@ -22,7 +22,7 @@ description: Change history of nuxt-base (newest first)
 - `testkit`: deterministic factories (fixed seed + clock), temp DB per test file, app test client, playwright helpers · `api` and `db` require each other
 - Generator: `when.with/without/db` conditions, `mysqlHost` context; locked runtime moved `src/kit/*.ts` → `src/kit/<area>/` (projects from 0.1.3-era scaffolds show drift until `scaffold update`)
 - Tests: gate = 201 unit (4 MySQL-only skipped with a loud notice) + 4 e2e · `gate:kit` 15/15 (adds api+db on SQLite, MySQL 8.4 throwaway container, container, fullstack) · real MySQL: migrate up→down→up, KILL-connection recovery, lock-wait retry, backup refusal
-- Open: not run on mysql-central (needs a user with grants on `test_%`) · check-before-replace needs a pre-up `db-check` hook in the private deploy-docker.sh · bump `kit/runtime/api/kit-version.ts` with package.json
+- Open: not run on the central dev MySQL (needs a user with grants on `test_%`) · check-before-replace needs a pre-up `db-check` hook in the private deploy-docker.sh · bump `kit/runtime/api/kit-version.ts` with package.json
 
 ### t1093 — dev-kit A: kit core in `kit/` (epic t1092)
 - `kit/bin/scaffold.mjs` + `kit/lib` — zero-dependency Node generator: `new | add | check | update | list`, `--json`, exit codes 0/1 drift/2 usage/3 dir not empty/4 unknown or planned/70 internal · pure (writes only under `--dir`; infra values arrive via `--context`, resolved by the `ai scaffold` wrapper in ai-cli, t1087)
@@ -35,7 +35,7 @@ description: Change history of nuxt-base (newest first)
 ## 2026-11-15
 
 ### t1086 — proof: drill/ui migrated to the layer (deployed)
-- drill `ui/` now `extends github:like12like12s/nuxt-base#v0.1.3`; 11 copied components + main.css + own Tailwind plugin removed (drill 1a17df8), deployed tag `20261115-132406-1a17df8` on lxc-project, healthy
+- drill `ui/` now `extends github:like12like12s/nuxt-base#v0.1.3`; 11 copied components + main.css + own Tailwind plugin removed (drill 1a17df8), deployed tag `20261115-132406-1a17df8` on the container host, healthy
 - Parity with `scripts/parity-shots.mjs` (10 routes, before vs after on the same live API, repeated on live): all 200, no new JS errors, pixel diff 0–3.3% on 8 routes, `/scenarios` 8.6% (+1 px/row × 365), error page replaced by the layer's. Every delta = the app's copies being behind the template (Toggle 20→24 px, Input 38→36 px, muted text zinc-500/600→400, focus ring, Modal Esc) — i.e. the drift the layer removes
 - Evidence `~/archive/research/t1086-nuxt-base/` · jot note linked from the task report
 - Follow-ups: t1087 (`ai scaffold`), t1088 (drift job), t1089 (remaining apps), t1090 (deploy-docker .env preflight)
