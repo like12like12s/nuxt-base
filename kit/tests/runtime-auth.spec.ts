@@ -266,7 +266,7 @@ async function setup(overrides: Partial<AuthOptions<(typeof ROLES)[number]>> = {
   const logger = createLogger('info', (line) => lines.push(JSON.parse(line)), { service: 'svc', env: 'test' })
   const auth = createAuth({ db: database.db, roles: ROLES, roleMap: ROLE_MAP, proxy: { secret: SECRET }, env: 'test', logger, ...overrides })
   const app = createApi({ name: 'svc', version: '1.0.0', logger })
-  app.use('/api/*', auth.middleware)
+  app.use('*', auth.middleware)
   const who = (c: any) => c.json({ data: 'ok' }, 200)
   mountV1(app, (v1) => {
     v1.openapi(route('get', '/open', publicRoute()), who)
@@ -351,6 +351,59 @@ describe('route declarations', () => {
     expect((await t.as('alice', 'app-admins').get('/api/v1/things')).status).toBe(200)
     expect((await t.anonymous.get('/api/v1/nope')).status).toBe(404)
     expect((await t.anonymous.get('/api/v1/things')).status).toBe(401) // a refusal of a declared route is untouched
+  })
+
+  // M13 (review t1097): the runtime refusal only covered /api/v1/*, and "declared" was true when ANY matched route
+  // had a declaration — so an undeclared handler in front of a declared one ran.
+  it('fail closed on every path: an undeclared route outside /api/v1 is refused too; the system routes stay public', async () => {
+    const t = await setup()
+    let ran = 0
+    t.app.get('/api/v2/secret', (c) => { ran++; return c.json({ data: 'leak' }) })
+    t.app.get('/admin/stats', (c) => { ran++; return c.json({ data: 'leak' }) })
+    t.app.post('/hooks/incoming', (c) => { ran++; return c.json({ data: 'leak' }) })
+    t.app.get('/admin/ok', requireRole('admin'), (c) => c.json({ data: 'ok' })) // declared, outside /api/v1
+    expect(undeclaredRoutes(t.app)).toEqual(['GET /admin/stats', 'GET /api/v2/secret', 'POST /hooks/incoming'])
+    for (const client of [t.anonymous, t.as('alice', 'app-admins')]) {
+      for (const res of [await client.get('/api/v2/secret'), await client.get('/admin/stats'), await client.post('/hooks/incoming', {})]) {
+        expect(res.status).toBe(500)
+        expect(JSON.stringify(res.body)).not.toContain('leak')
+      }
+    }
+    expect(ran).toBe(0)
+    expect(t.lines.filter((l) => l.msg === 'route without an auth declaration — refused').map((l) => l.path)).toEqual(['/api/v2/secret', '/admin/stats', '/hooks/incoming', '/api/v2/secret', '/admin/stats', '/hooks/incoming'])
+    for (const path of ['/health/live', '/health/ready', '/version', '/openapi.json']) expect((await t.anonymous.get(path)).status, path).toBe(200)
+    expect((await t.anonymous.get('/nope')).status).toBe(404)
+    // a declared route outside /api/v1 works like any other
+    expect((await t.anonymous.get('/admin/ok')).status).toBe(401)
+    expect((await t.as('alice', 'app-admins').get('/admin/ok')).status).toBe(200)
+  })
+
+  it('the declaration that counts is the one of the handler that runs: an undeclared route in front of a declared one is refused', async () => {
+    const t = await setup()
+    let ran = false
+    mountV1(t.app, (v1) => {
+      v1.get('/late/:id', (c) => { ran = true; return c.json({ data: 'leak' }) }) // matches first, declares nothing
+      v1.openapi(route('get', '/late/special', requireAuth()), (c) => c.json({ data: 'ok' }, 200))
+    })
+    // the static list agrees with the runtime: a declaration that is not the route's FIRST handler does not count
+    t.app.get('/second', async (_c, next) => next(), requireAuth(), (c) => c.json({ data: 'ok' }))
+    expect(undeclaredRoutes(t.app)).toEqual(['GET /api/v1/late/:id', 'GET /second'])
+    const res = await t.as('alice', 'app-admins').get('/api/v1/late/special')
+    expect(res.status).toBe(500)
+    expect(JSON.stringify(res.body)).not.toContain('leak')
+    expect(ran).toBe(false)
+    expect((await t.as('alice', 'app-admins').get('/second')).status).toBe(500)
+  })
+
+  it('paths in `ignore` are not the guard\'s business, wherever the middleware is mounted', async () => {
+    const database = await testDb('sqlite')
+    const auth = createAuth({ db: database.db, roles: ROLES, roleMap: ROLE_MAP, proxy: { secret: SECRET }, env: 'test', ignore: ['/metrics'] })
+    const app = createApi({ name: 'svc', version: '1.0.0', logger: createLogger('error', () => undefined, { service: 'svc', env: 'test' }) })
+    app.use('*', auth.middleware)
+    app.get('/metrics', (c) => c.text('up 1'))
+    app.get('/other', (c) => c.text('leak'))
+    expect((await testClient(app).get('/metrics')).status).toBe(200)
+    expect((await testClient(app).get('/other')).status).toBe(500)
   })
 
   it('requireRole() without a role is refused when the route is defined', () => {

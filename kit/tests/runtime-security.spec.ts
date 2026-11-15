@@ -3,7 +3,11 @@
 import { describe, expect, it } from 'vitest'
 import { createApi } from '../runtime/api/app'
 import { createLogger } from '../runtime/api/log'
-import { SecurityConfigError, parseOrigins, rateLimit, security, type SecurityOptions } from '../runtime/security/security'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { PROXY_SECRET_HEADER } from '../runtime/auth/proxy'
+import { SecurityConfigError, parseOrigins, rateLimit, security, type RateLimitOptions, type SecurityOptions } from '../runtime/security/security'
+import { KIT_ROOT } from './helpers'
 import { testClient } from '../runtime/testing/client'
 
 function app(options: Partial<SecurityOptions> = {}, extra: Parameters<typeof createApi>[0]['middleware'] = []) {
@@ -128,6 +132,70 @@ describe('rate limit', () => {
     const { api } = app({ rateLimit: { max: 1, windowMs: 60_000 } })
     expect((await api.get('/api/v1/things', { headers: { 'x-forwarded-for': '198.51.100.1' } })).status).toBe(200)
     expect((await api.get('/api/v1/things', { headers: { 'x-forwarded-for': '198.51.100.2' } })).status).toBe(429)
+  })
+
+  // M4 (review t1097): behind a proxy every user had the proxy's address, so one busy client got everyone a 429.
+  describe('behind a reverse proxy', () => {
+    const SECRET = 'proxy-secret-for-tests'
+    // the app as @hono/node-server calls it: the TCP peer is on the request's env
+    function behind(trust: RateLimitOptions['trust'], max = 3) {
+      const shared: string[] = []
+      const api = createApi({ name: 'svc', version: '1', logger: createLogger('error', () => undefined), middleware: [rateLimit({ max, windowMs: 60_000, trust, onSharedPeer: (peer) => shared.push(peer) })] })
+      api.get('/x', (c) => c.json({ ok: true }))
+      const hit = async (peer: string, headers: Record<string, string> = {}) => (await api.request('/x', { headers }, { incoming: { socket: { remoteAddress: peer } } })).status
+      return { hit, shared }
+    }
+    const PROXY = '10.0.0.5'
+    const via = (client: string, extra: Record<string, string> = {}) => ({ 'x-forwarded-for': client, 'x-auth-proxy-secret': SECRET, ...extra })
+
+    it('many clients behind one trusted proxy each have their own budget — one noisy client does not lock the others out', async () => {
+      const t = behind({ secret: SECRET })
+      const noisy: number[] = []
+      for (let i = 0; i < 6; i++) noisy.push(await t.hit(PROXY, via('203.0.113.1')))
+      expect(noisy).toEqual([200, 200, 200, 429, 429, 429])
+      for (let n = 2; n < 40; n++) expect(await t.hit(PROXY, via(`203.0.113.${n}`)), `client ${n}`).toBe(200)
+      expect(await t.hit(PROXY, via('203.0.113.1'))).toBe(429)
+      expect(t.shared).toEqual([])
+    })
+
+    it('only the entry the trusted proxy wrote counts: a client cannot buy a fresh budget with its own X-Forwarded-For', async () => {
+      const t = behind({ secret: SECRET })
+      const statuses: number[] = []
+      for (let i = 0; i < 5; i++) statuses.push(await t.hit(PROXY, via(`198.51.100.${i}, 203.0.113.9`))) // spoofed first entry changes every time
+      expect(statuses).toEqual([200, 200, 200, 429, 429])
+      expect(await t.hit(PROXY, via('203.0.113.9:51234'))).toBe(429) // same client, written with a port
+    })
+
+    it('without the secret (or with a wrong one) the header is not believed: the request counts against its peer', async () => {
+      const t = behind({ secret: SECRET })
+      const statuses: number[] = []
+      for (let i = 0; i < 5; i++) statuses.push(await t.hit('192.0.2.66', { 'x-forwarded-for': `203.0.113.${i}`, ...(i % 2 ? { 'x-auth-proxy-secret': 'guess' } : {}) }))
+      expect(statuses).toEqual([200, 200, 200, 429, 429])
+      expect(t.shared).toEqual(['192.0.2.66']) // reported once
+      // clients of the real proxy are unaffected by that peer's bucket
+      expect(await t.hit(PROXY, via('203.0.113.1'))).toBe(200)
+    })
+
+    it('a trusted source list uses the TCP peer; with both configured both must hold', async () => {
+      const byAddress = behind({ trustedProxies: '10.0.0.0/24, ::1' }, 1)
+      expect([await byAddress.hit(PROXY, { 'x-forwarded-for': '203.0.113.1' }), await byAddress.hit('::ffff:10.0.0.5', { 'x-forwarded-for': '203.0.113.2' })]).toEqual([200, 200])
+      expect([await byAddress.hit('192.0.2.1', { 'x-forwarded-for': '203.0.113.3' }), await byAddress.hit('192.0.2.1', { 'x-forwarded-for': '203.0.113.4' })]).toEqual([200, 429])
+      const both = behind({ secret: SECRET, trustedProxies: ['10.0.0.5'] }, 1)
+      expect([await both.hit('192.0.2.1', via('203.0.113.1')), await both.hit('192.0.2.1', via('203.0.113.2'))]).toEqual([200, 429]) // right secret, wrong peer
+      expect([await both.hit(PROXY, via('203.0.113.1')), await both.hit(PROXY, via('203.0.113.2'))]).toEqual([200, 200])
+      expect(() => rateLimit({ max: 1, windowMs: 1000, trust: { trustedProxies: 'not-an-address' } })).toThrow(SecurityConfigError)
+    })
+
+    it('no trust configured: a proxy is one client (the documented reason the fullstack default is off), direct callers are per peer', async () => {
+      const t = behind(undefined, 2)
+      expect([await t.hit(PROXY, { 'x-forwarded-for': '203.0.113.1' }), await t.hit(PROXY, { 'x-forwarded-for': '203.0.113.2' }), await t.hit(PROXY, { 'x-forwarded-for': '203.0.113.3' })]).toEqual([200, 200, 429])
+      expect(t.shared).toEqual([PROXY])
+      expect([await t.hit('192.0.2.1'), await t.hit('192.0.2.2')]).toEqual([200, 200])
+    })
+
+    it('uses the same secret header as the auth module', () => {
+      expect(readFileSync(join(KIT_ROOT, 'runtime/security/security.ts'), 'utf8')).toContain(`const PROXY_SECRET_HEADER = '${PROXY_SECRET_HEADER}'`)
+    })
   })
 
   it('tracks a bounded number of clients; bad settings are config errors', async () => {

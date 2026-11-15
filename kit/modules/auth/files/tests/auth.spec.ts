@@ -65,6 +65,20 @@ describe('every route declares who may call it', () => {
     expect(res.status).toBe(500)
     expect(JSON.stringify(res.body)).not.toContain('leak')
   })
+
+  it('also outside /api/v1: an undeclared route anywhere is refused at run time; the system routes stay public', async () => {
+    const { app, anonymous, client } = real()
+    app.get('/api/v2/secret', (c) => c.json({ data: 'leak' }))
+    app.get('/admin/stats', (c) => c.json({ data: 'leak' }))
+    for (const api of [anonymous, client(CALLERS.admin)]) {
+      for (const path of ['/api/v2/secret', '/admin/stats']) {
+        const res = await api.get(path)
+        expect(res.status, path).toBe(500)
+        expect(JSON.stringify(res.body)).not.toContain('leak')
+      }
+    }
+    for (const path of ['/health/live', '/version', '/openapi.json']) expect((await anonymous.get(path)).status, path).toBe(200)
+  })
 })
 
 describe('role x endpoint', () => {

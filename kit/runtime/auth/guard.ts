@@ -7,8 +7,12 @@
 //   publicRoute() / requireAuth() / requireRole('admin', ...)
 //                                the auth DECLARATION of a route — every route has exactly one:
 //                                  createRoute({ method: 'get', path: '/things', middleware: [requireAuth()] as const, ... })
+//                                the declaration is the FIRST handler of the route (plain hono:
+//                                `app.get('/x', requireAuth(), handler)`): what counts is what runs first.
 // A route without a declaration is a bug with a security impact, so it is refused twice: the middleware answers 500
-// instead of running it, and undeclaredRoutes(app) lists it so a test fails before it ships.
+// instead of running it — on EVERY path the middleware is mounted on (mount it on `*`), not only under /api/v1 — and
+// undeclaredRoutes(app) lists it so a test fails before it ships. Both look at the same thing: the first handler
+// registered for the method + path.
 import type { Context, MiddlewareHandler } from 'hono'
 import { matchedRoutes } from 'hono/route'
 import type { Kysely } from 'kysely'
@@ -75,9 +79,8 @@ export function routeRules(app: { routes: readonly RouteEntry[] }, options: { ig
   for (const route of app.routes) {
     if (isMiddleware(route) || ignore.includes(route.path)) continue
     const key = `${route.method} ${route.path}`
-    const entry = seen.get(key) ?? { method: route.method, path: route.path, rule: null }
-    entry.rule ??= ruleOf(route.handler) ?? null
-    seen.set(key, entry)
+    // The first handler registered for a method + path is the one that runs first: only its declaration counts.
+    if (!seen.has(key)) seen.set(key, { method: route.method, path: route.path, rule: ruleOf(route.handler) ?? null })
   }
   return [...seen.values()].sort((a, b) => (a.path === b.path ? a.method.localeCompare(b.method) : a.path.localeCompare(b.path)))
 }
@@ -103,10 +106,12 @@ export interface AuthOptions<R extends string = string> {
   logger?: Logger
   /** TCP peer of the request. Default: the socket of @hono/node-server. Injectable for tests. */
   remoteAddress?: (c: Context) => string | undefined
+  /** Exact paths the guard leaves alone (default SYSTEM_PATHS: health, version, openapi — public by definition). */
+  ignore?: readonly string[]
 }
 
 export interface Auth {
-  /** Mount in front of the routes it protects: `api.use('/api/*', auth.middleware)`. */
+  /** Mount in front of every route: `api.use('*', auth.middleware)` — a route outside the mount is not guarded at all. */
   middleware: MiddlewareHandler
   /** How forward-auth is set up — logged at boot, never a secret. */
   describe(): { mode: 'dev-user' | 'proxy' | 'tokens-only'; proxySecret: boolean; trustedProxies: number }
@@ -124,6 +129,7 @@ export function createAuth<R extends string>(options: AuthOptions<R>): Auth {
   const remoteAddress = options.remoteAddress ?? socketAddress
   const proxySecret = Boolean(options.proxy.secret?.trim())
   const trustedProxies = options.proxy.trustedProxies?.length ?? 0
+  const ignore = options.ignore ?? SYSTEM_PATHS
 
   async function identify(c: Context): Promise<RequestUser | undefined> {
     if (devUser) return devUser
@@ -153,15 +159,17 @@ export function createAuth<R extends string>(options: AuthOptions<R>): Auth {
   const middleware: MiddlewareHandler = async (c, next) => {
     const context = getContext()
     if (!context) throw new Error('auth middleware needs the request scope of createApi()')
+    if (ignore.includes(c.req.path)) return next()
     const user = await identify(c)
     if (user) context.user = user
 
     // Fail closed: a route that matched but declares nothing is not run.
-    const matched = matchedRoutes(c)
-    const routes = matched.filter((route) => !isMiddleware(route))
-    const declared = matched.some((route) => ruleOf(route.handler))
-    if (routes.length && !declared) {
-      logger?.error('route without an auth declaration — refused', { method: c.req.method, path: routes.at(-1)?.path })
+    // "Declared" is decided by the handler that runs first — the first matched route that is not middleware — never
+    // by some other route that happens to match the same request further down.
+    const first = matchedRoutes(c).find((route) => !isMiddleware(route))
+    const declared = first !== undefined && ruleOf(first.handler) !== undefined
+    if (first && !declared) {
+      logger?.error('route without an auth declaration — refused', { method: c.req.method, path: first.path })
       throw new ApiError('INTERNAL', 'Internal server error')
     }
     await next()

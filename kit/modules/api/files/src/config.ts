@@ -26,7 +26,14 @@ const shape = {
   // @kit:end
   // @kit:if security
   CORS_ORIGINS: z.string().optional(),
+  // Requests per window per client; 0 = off. The client is the TCP peer unless the request came through the trusted
+  // reverse proxy (usage.md, "Security baseline").
+  // @kit:if kind:fullstack
+  // Off by default here: the peer of this API is the UI server, so without proxy trust every user would share one budget.
+  RATE_LIMIT_MAX: z.coerce.number().int().min(0).default(0),
+  // @kit:else
   RATE_LIMIT_MAX: z.coerce.number().int().min(0).default(300),
+  // @kit:end
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60_000),
   BODY_LIMIT_BYTES: z.coerce.number().int().min(1).default(1_048_576),
   // @kit:end

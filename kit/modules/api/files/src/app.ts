@@ -8,11 +8,7 @@ import { appAuth } from './auth/index.js'
 import type { Config } from './config.js'
 import type { AppDatabase } from './db/index.js'
 import { migrations as shippedMigrations } from './db/migrations/index.js'
-// @kit:if auth
-import { API_V1, createApi, mountV1 } from './kit/api/app.js'
-// @kit:else
 import { createApi, mountV1 } from './kit/api/app.js'
-// @kit:end
 import { createLogger, type Logger } from './kit/api/log.js'
 import { databaseChecks } from './kit/db/checks.js'
 import type { Migrations } from './kit/db/migrate.js'
@@ -54,7 +50,18 @@ export function createApp(config: Config, deps: AppDeps) {
     // In front of every route: secure headers, CORS allowlist, rate limit, body size limit.
     middleware: security({
       corsOrigins: parseOrigins(config.CORS_ORIGINS),
-      rateLimit: config.RATE_LIMIT_MAX > 0 ? { max: config.RATE_LIMIT_MAX, windowMs: config.RATE_LIMIT_WINDOW_MS } : null,
+      rateLimit:
+        config.RATE_LIMIT_MAX > 0
+          ? {
+              max: config.RATE_LIMIT_MAX,
+              windowMs: config.RATE_LIMIT_WINDOW_MS,
+              // @kit:if auth
+              // Per client behind the reverse proxy — believed under the same rule as its identity headers.
+              trust: { secret: config.AUTH_PROXY_SECRET, trustedProxies: config.AUTH_TRUSTED_PROXIES },
+              // @kit:end
+              onSharedPeer: (peer) => logger.warn('rate limit: requests arrive through a proxy that is not trusted — all its users share one budget (set the proxy trust, or RATE_LIMIT_MAX=0)', { peer }),
+            }
+          : null,
       bodyLimitBytes: config.BODY_LIMIT_BYTES,
     }),
     // @kit:end
@@ -65,9 +72,11 @@ export function createApp(config: Config, deps: AppDeps) {
   })
 
   // @kit:if auth
-  // Who is calling: resolved once per request, in front of every /api/v1 route. A route says what it demands with
-  // publicRoute() / requireAuth() / requireRole() — one without a declaration is refused (and fails tests/auth.spec.ts).
-  api.use(`${API_V1}/*`, appAuth(config, deps.database, logger).middleware)
+  // Who is calling: resolved once per request, in front of EVERY route — also one added outside /api/v1. A route says
+  // what it demands with publicRoute() / requireAuth() / requireRole() as its first middleware; one without a
+  // declaration is refused at run time (500) and fails tests/auth.spec.ts. Only the standard's own system routes
+  // (/health/*, /version, /openapi.json) are exempt.
+  api.use('*', appAuth(config, deps.database, logger).middleware)
 
   // @kit:end
   // Resources of the app. One register<Resource>() per resource, all under /api/v1.

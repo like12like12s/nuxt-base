@@ -154,7 +154,8 @@ Rules that keep the output deterministic — **same inputs, byte-identical outpu
   `package.json` fragments merge key by key and the later unit wins; dependency maps are written sorted.
 - Templates may use `{{kit.<var>}}` only (Vue's own `{{ }}` is untouched). An unknown variable is an error. Variables:
   `name title description titleJson descriptionJson kind kitVersion layerRef modules db deploy port uiPort apiPort
-  apiDir uiDir dir registry deployHost deployDomain deployUser mysqlHost dbName databaseUrlExample services nuxtConfig
+  apiDir uiDir dir registry deployHost deployDomain deployUser mysqlHost dbName databaseUrlExample rateLimitDefault
+  services nuxtConfig
   usageSections`. Use the `*Json` forms inside source code — they are quoted and escaped.
 - No clock, no randomness, no environment lookups in a template or in `lib/compose.mjs`.
 - Conditional blocks: a line that is only a comment `@kit:if <terms>` / `@kit:else` / `@kit:end` (`//`, `#` or
@@ -285,7 +286,8 @@ auth      identity from three sources, in this order: the fixed dev user (AUTH_D
           Trusted users are upserted into `users` (written and audited on change only); roles are the app's own
           (src/auth/roles.ts), mapped from identity-provider groups by AUTH_ROLE_MAP.
           Every route declares who may call it — `publicRoute()` / `requireAuth()` / `requireRole(…)` as route
-          middleware. A route without a declaration is refused at run time (500, logged) and listed by
+          middleware — the first one of the route. A route without a declaration is refused at run time on every
+          path except the system routes (500, logged) and listed by
           `undeclaredRoutes(app)`, which the generated tests/auth.spec.ts requires to be empty next to its
           role x endpoint matrix (which must name every route). GET /api/v1/me returns the caller; in a UI the
           layer's useAuth() reads it. kinds api / fullstack (brings api + db) and nuxt-app (UI wiring only).
@@ -297,7 +299,8 @@ trace     OpenTelemetry (sdk-trace 3.x) -> OTLP/HTTP. Off until OTEL_EXPORTER_OT
           (src/kit/testing/otlp-collector.ts).
 security  `createApi({ middleware: security({…}) })`: secure headers (nosniff, DENY, no-referrer, HSTS, CSP none),
           CORS allowlist of exact origins with credentials (a wildcard stops the boot), body limit (413), a fixed
-          window rate limit per TCP peer (429 + retry-after, /health/* exempt). Refusals use the error shape.
+          window rate limit per client (429 + retry-after, /health/* exempt): the TCP peer, or the client address a
+          TRUSTED proxy reports (same rule as auth); fullstack defaults to off, its API only ever sees the UI server. Refusals use the error shape.
 og        per-URL title / description / og:* / twitter:* / canonical for crawlers: the SPA shell's <head> is rewritten
           in the server's HTML renderer (Nitro `render:html`), the same code on Node and on Cloudflare Pages. The
           app owns server/og.ts (URL -> meta, may be async, abandoned after 3 s, an error never breaks the page).
@@ -310,7 +313,7 @@ notify    client of a notification hub (`POST <NOTIFIER_URL>/notify`, bearer tok
 ```
 
 `createApi()` has two middleware slots for them: `before` (wraps the request scope — tracing) and `middleware` (inside
-it, in front of every route including the system ones — security). The auth middleware is mounted on `/api/v1/*`.
+it, in front of every route including the system ones — security). The auth middleware is mounted on `*`: an undeclared route is refused on every path, not only under `/api/v1`.
 
 ## Deploy presets
 

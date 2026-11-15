@@ -75,6 +75,15 @@ describe('security module', () => {
     const config = read(dir, 'src/config.ts')
     for (const text of ['CORS_ORIGINS: z.string().optional()', 'RATE_LIMIT_MAX: z.coerce.number().int().min(0).default(300)', 'BODY_LIMIT_BYTES: z.coerce.number().int().min(1).default(1_048_576)']) expect(config).toContain(text)
     expect(read(dir, '.env.example')).toMatch(/\nCORS_ORIGINS=\n/)
+    expect(read(dir, '.env.example')).toMatch(/\nRATE_LIMIT_MAX=300\n/)
+    expect(config).not.toContain('.default(0)')
+    // M4: behind the fullstack UI every user has the same TCP peer — the in-app limit is off until proxy trust is set
+    const full = scaffold(['--kind', 'fullstack', '--with', 'security,auth'])
+    expect(read(full.dir, 'api/src/config.ts')).toContain('RATE_LIMIT_MAX: z.coerce.number().int().min(0).default(0)')
+    expect(read(full.dir, 'api/src/config.ts')).not.toContain('.default(300)')
+    expect(read(full.dir, 'api/.env.example')).toMatch(/\nRATE_LIMIT_MAX=0\n/)
+    expect(read(full.dir, 'api/src/app.ts')).toContain('trust: { secret: config.AUTH_PROXY_SECRET, trustedProxies: config.AUTH_TRUSTED_PROXIES },')
+    expect(read(dir, 'src/app.ts')).not.toContain('AUTH_PROXY_SECRET') // no auth module, no trust: per TCP peer
     expect(read(dir, '.memory/docs/guides/usage.md')).toContain('## Security baseline')
   })
 

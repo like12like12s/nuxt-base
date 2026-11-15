@@ -9,6 +9,12 @@ Applied to every route, system routes included (`createApi({ middleware: securit
   origin) = no CORS headers at all.
 - **Body limit**: `BODY_LIMIT_BYTES` (default 1 MiB) -> `413` with code `VALIDATION`.
 - **Rate limit**: `RATE_LIMIT_MAX` requests per `RATE_LIMIT_WINDOW_MS` per client -> `429` with code `RATE_LIMITED` and
-  `retry-after`; `/health/*` is exempt. It is a backstop: the client is the TCP peer (behind a proxy or the fullstack
-  UI that is the proxy itself, so everyone shares one budget) and the counters live in this process. Put real limits
-  at the edge; set `RATE_LIMIT_MAX=0` to switch this one off.
+  `retry-after`; `/health/*` is exempt; `0` = off. Who "the client" is:
+  - a direct caller: its TCP peer address. `X-Forwarded-For` typed by a client is never believed.
+  - behind the reverse proxy, with the `auth` module's proxy trust in place (`AUTH_PROXY_SECRET` and/or
+    `AUTH_TRUSTED_PROXIES`): the client address that proxy reports (the last `X-Forwarded-For` entry) — each user has
+    their own budget, also through the fullstack UI, which forwards the proxy's headers unchanged.
+  - behind a proxy without that trust: everyone shares the proxy's one budget, and the API logs a warning once. That
+    is why the default is `{{kit.rateLimitDefault}}` in this project (fullstack: off, the UI server is the peer of
+    every request; api: 300). Set the trust and a limit, or leave it off and limit at the edge.
+  The counters live in this process — a backstop, not a replacement for limits at the edge.

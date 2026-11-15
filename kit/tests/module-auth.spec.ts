@@ -35,7 +35,7 @@ describe('auth module', () => {
 
     it('the app mounts the auth middleware in front of /api/v1 and every items route declares its rule', () => {
       const app = read(dir, 'src/app.ts')
-      expect(app).toContain('api.use(`${API_V1}/*`, appAuth(config, deps.database, logger).middleware)')
+      expect(app).toContain("api.use('*', appAuth(config, deps.database, logger).middleware)") // every path, not only /api/v1 (M13)
       expect(app.indexOf('appAuth(config')).toBeLessThan(app.indexOf('mountV1(api'))
       expect(app).toContain('registerMe(v1)')
       const routes = read(dir, 'src/resources/items/items.routes.ts')

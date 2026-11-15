@@ -8,7 +8,7 @@
     "api": {
       "env": [
         { "key": "CORS_ORIGINS", "required": false, "secret": false, "example": "", "description": "Exact origins allowed to call the API from a browser, comma-separated (no wildcard). Empty = same-origin only" },
-        { "key": "RATE_LIMIT_MAX", "required": false, "secret": false, "example": "300", "description": "Requests per window per client (TCP peer); 0 = no rate limit in the app" },
+        { "key": "RATE_LIMIT_MAX", "required": false, "secret": false, "example": "{{kit.rateLimitDefault}}", "description": "Requests per window per client; 0 = no rate limit in the app. Per client = per TCP peer, or per user behind the trusted reverse proxy (AUTH_PROXY_SECRET / AUTH_TRUSTED_PROXIES) — behind an untrusted proxy everyone shares one budget" },
         { "key": "RATE_LIMIT_WINDOW_MS", "required": false, "secret": false, "example": "60000", "description": "Rate limit window" },
         { "key": "BODY_LIMIT_BYTES", "required": false, "secret": false, "example": "1048576", "description": "Largest request body accepted (413 above it)" }
       ],

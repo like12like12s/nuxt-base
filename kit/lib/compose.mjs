@@ -260,6 +260,8 @@ export function compose(kit, input) {
     // Empty = tracing stays off until the operator sets it. Never a host of ours: it arrives through --context.
     otlpEndpoint: sel.answers.otlpEndpoint ?? '',
     authentikUrl: sel.answers.authentikUrl ?? 'https://authentik.example.com',
+    // Behind the fullstack UI every user has the same TCP peer: the in-app rate limit is off until proxy trust is set.
+    rateLimitDefault: kind.name === 'fullstack' ? '0' : '300',
     dbName: sel.name.replaceAll('-', '_'),
     // Placeholders, never a credential: the real URL lives in .env only.
     databaseUrlExample:
