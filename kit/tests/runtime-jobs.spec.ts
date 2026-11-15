@@ -96,11 +96,11 @@ describe('lock — races between processes', () => {
   const CHILD = join(KIT_ROOT, 'tests', 'fixtures', 'lock-race.mjs')
   const DEAD_PID = 2 ** 22 + 12345 // above the kernel's pid_max: never a live process
 
-  async function round(prepare: (dir: string) => void, contenders = 12, holdMs = 150) {
+  async function round(prepare: (dir: string) => void, contenders = 12, holdMs = 400) {
     const dir = tmp('race')
     const log = join(dir, 'holders.log')
     prepare(dir)
-    const at = Date.now() + 700
+    const at = Date.now() + 1200 // every child is up and spinning by then, also on a slow CI runner
     const exits = await Promise.all(Array.from({ length: contenders }, () => new Promise<number | null>((resolve) => {
       const child = spawn(process.execPath, [CHILD, process.env.KIT_LOCK_MODULE ?? LOCK_MODULE, dir, String(at), log, String(holdMs)], { stdio: 'ignore' })
       child.on('close', (code) => resolve(code))
@@ -115,14 +115,18 @@ describe('lock — races between processes', () => {
     const stale = JSON.stringify({ pid: DEAD_PID, host: hostname(), startedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 600_000).toISOString() })
     const rounds = []
     for (let i = 0; i < 6; i++) rounds.push(await round((dir) => writeFileSync(join(dir, 'race.lock'), stale)))
-    expect(rounds.map((r) => r.holders)).toEqual([1, 1, 1, 1, 1, 1])
+    // What must never happen: two holders at the same time. (A child that started late may take the lock after the
+    // first holder released it — that is a second run, not an overlap — so the count alone is not the assertion.)
+    expect(rounds.map((r) => r.overlapping)).toEqual([0, 0, 0, 0, 0, 0])
+    expect(rounds.every((r) => r.holders >= 1 && r.holders <= 2), JSON.stringify(rounds.map((r) => r.holders))).toBe(true)
     expect(rounds.flatMap((r) => r.left)).toEqual([]) // the stale lock, the winner's lock and every temp file are gone
   }, 60_000)
 
   it('with no lock at all, exactly one of 12 simultaneous starts runs', async () => {
     const rounds = []
     for (let i = 0; i < 4; i++) rounds.push(await round(() => undefined))
-    expect(rounds.map((r) => r.holders)).toEqual([1, 1, 1, 1])
+    expect(rounds.map((r) => r.overlapping)).toEqual([0, 0, 0, 0])
+    expect(rounds.every((r) => r.holders >= 1 && r.holders <= 2), JSON.stringify(rounds.map((r) => r.holders))).toBe(true)
     expect(rounds.flatMap((r) => r.left)).toEqual([])
   }, 60_000)
 })

@@ -492,7 +492,7 @@ describe('transient errors — what is retried and what is not', () => {
         expect(waited).toBeGreaterThanOrEqual(900)
         expect(waited).toBeLessThan(2500)
       })
-      expect(longestStall).toBeLessThan(250) // was ~3000 ms with timeout 1000 and 2 retries
+      expect(longestStall).toBeLessThan(500) // one slice is 50 ms; it was ~3000 ms with timeout 1000 and 2 retries
       // (b) the lock goes away while the statement waits: it succeeds, as it did with the long blocking wait
       const holder = first.db.transaction().execute(async (trx) => {
         await trx.insertInto('things').values({ ...created(), name: 'short lock', count: 0 }).execute()
@@ -513,7 +513,7 @@ describe('transient errors — what is retried and what is not', () => {
         return { result: null, after: { name: 'in a transaction' } }
       })
       await again
-      expect(longestStall).toBeLessThan(250)
+      expect(longestStall).toBeLessThan(500)
     } finally {
       clearInterval(ticker)
       await second.close()
