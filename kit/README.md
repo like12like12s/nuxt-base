@@ -341,7 +341,10 @@ container   multi-stage Dockerfile + .dockerignore per part (locked) · docker/d
             docker/env.example filled from --context (deploy.registry / host / domain / user). With the db module the
             compose file has a one-shot `db-check` service the API depends on (`node dist/db/cli.js predeploy`: migrate
             when DB_MIGRATE_ON_DEPLOY=1, then database == image or the API does not start). A one-part project gets a
-            symlinked service dir (`web -> .` / `api -> .`). No `container_name`: compose names containers
+            symlinked service dir (`web -> .` / `api -> .`). `GET /version` of a deployed API reports commit and
+            build time with an unchanged deploy script: compose passes the deployed tag as `APP_IMAGE_TAG` (its
+            trailing commit is used) and the API image stamps its build time; the build args `APP_COMMIT` /
+            `APP_BUILT_AT` override both when a script passes them. No `container_name`: compose names containers
             `<project>-<service>-1`, so two stages of one app run on one host (second stage: another directory with
             `COMPOSE_PROJECT_NAME` and other ports in its `.env`). The deploy script itself is NOT in the kit: it carries
             site-specific defaults, so the wrapper (or the developer) copies it from the private docker-node template.

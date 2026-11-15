@@ -12,6 +12,7 @@ import type { Config } from './config.js'
 import type { AppDatabase } from './db/index.js'
 import { migrations as shippedMigrations } from './db/migrations/index.js'
 import { createApi, mountV1 } from './kit/api/app.js'
+import { buildInfo } from './kit/api/build-info.js'
 import { createLogger, type Logger } from './kit/api/log.js'
 import { databaseChecks } from './kit/db/checks.js'
 import type { Migrations } from './kit/db/migrate.js'
@@ -62,7 +63,8 @@ export function createApp(config: Config, deps: AppDeps) {
     version: VERSION,
     logger,
     checks: databaseChecks(deps.database, deps.migrations ?? shippedMigrations),
-    build: { commit: config.APP_COMMIT, builtAt: config.APP_BUILT_AT },
+    // commit + builtAt of /version: the image's build args, else the deployed tag and the image's build stamp.
+    build: buildInfo({ commit: config.APP_COMMIT, builtAt: config.APP_BUILT_AT, imageTag: config.APP_IMAGE_TAG }),
     trustTraceparent,
     // @kit:if security
     // In front of every route: secure headers, CORS allowlist, rate limit, body size limit.

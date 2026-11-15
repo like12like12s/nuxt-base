@@ -7,7 +7,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-RUN npm run build
+# The build time travels with the compiled code: GET /version reports it when no APP_BUILT_AT build arg is given.
+RUN npm run build && date -u +%Y-%m-%dT%H:%M:%SZ > dist/build-time.txt
 
 # Production deps in their own stage, so the runtime image needs no npm.
 FROM ${NODE_IMAGE} AS deps
@@ -26,6 +27,13 @@ ENV PORT=3000
 COPY package.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+# What GET /version reports. Optional — a deploy script that passes neither still gets a commit (from the image tag,
+# APP_IMAGE_TAG in the compose file) and a build time (dist/build-time.txt above). Exact values:
+#   docker build --build-arg APP_COMMIT=$(git rev-parse HEAD) --build-arg APP_BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) …
+# Declared last, so passing them never invalidates the layers above.
+ARG APP_COMMIT=
+ARG APP_BUILT_AT=
+ENV APP_COMMIT=${APP_COMMIT} APP_BUILT_AT=${APP_BUILT_AT}
 # Not root: files the app writes land in the bind mount with a normal owner, and the home dir is /home/node.
 USER node
 EXPOSE 3000

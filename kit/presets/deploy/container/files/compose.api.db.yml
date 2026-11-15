@@ -25,6 +25,8 @@ services:
     ports:
       - "${API_PORT:-{{kit.apiPort}}}:3000"
     env_file: .env
+    environment:
+      APP_IMAGE_TAG: ${API_TAG:-}   # GET /version reports the commit at the end of the deployed tag
     volumes:
       - ./data:/app/data
     depends_on:

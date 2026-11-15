@@ -26,14 +26,21 @@
           "required": false,
           "secret": false,
           "example": "",
-          "description": "Git commit of the running build, shown by GET /version"
+          "description": "Git commit of the running build, shown by GET /version. In an image: the build arg of the same name, else taken from APP_IMAGE_TAG"
         },
         {
           "key": "APP_BUILT_AT",
           "required": false,
           "secret": false,
           "example": "",
-          "description": "Build time (ISO-8601), shown by GET /version"
+          "description": "Build time (ISO-8601), shown by GET /version. In an image: the build arg of the same name, else the time the image build stamped"
+        },
+        {
+          "key": "APP_IMAGE_TAG",
+          "required": false,
+          "secret": false,
+          "example": "",
+          "description": "Tag of the running image (the container compose file passes it); a trailing commit in it is what /version reports when APP_COMMIT is not set"
         }
       ],
       "files": [
@@ -55,6 +62,10 @@
         {
           "from": "runtime/api/app.ts",
           "to": "src/kit/api/app.ts"
+        },
+        {
+          "from": "runtime/api/build-info.ts",
+          "to": "src/kit/api/build-info.ts"
         },
         {
           "from": "runtime/api/errors.ts",

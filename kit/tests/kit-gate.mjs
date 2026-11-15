@@ -335,10 +335,29 @@ async function gateCombo(combo, index) {
           if (!/schema ok/.test(migrated.out)) throw new StepError('predeploy with DB_MIGRATE_ON_DEPLOY=1 did not end with "schema ok"')
           begin(`container: image ${svc} runs and answers its health path`)
         }
-        const cid = (await run(log, 'docker', ['run', '-d', '-p', '127.0.0.1::3000', ...imageDb, tag], { cwd: dir, timeout: 60_000 })).out.trim()
+        // Started the way compose starts it: the deployed tag in APP_IMAGE_TAG, no build arg (the deploy script passes none).
+        const cid = (await run(log, 'docker', ['run', '-d', '-p', '127.0.0.1::3000', '-e', 'APP_IMAGE_TAG=20260131-235959-abc1234', ...imageDb, tag], { cwd: dir, timeout: 60_000 })).out.trim()
         containers.add(cid)
         const mapped = (await run(log, 'docker', ['port', cid, '3000/tcp'], { cwd: dir, timeout: 15_000 })).out.trim().split('\n')[0]
         await waitFor(`http://${mapped}${svc === 'api' ? '/health/live' : '/'}`, 40_000)
+        if (svc === 'api' && plan.modules.includes('api')) {
+          begin('container: /version of the image reports commit + builtAt (no build arg: tag + build stamp; build args win)')
+          const version = await (await waitFor(`http://${mapped}/version`, 10_000)).json()
+          const age = Date.now() - Date.parse(version.builtAt)
+          if (version.commit !== 'abc1234' || !(age >= 0 && age < 3_600_000)) throw new StepError(`/version without build args: ${JSON.stringify(version)}`)
+          const exact = `${tag}-args`
+          images.add(exact)
+          await dockerImage(log, ['build', '-q', '-t', exact, '--build-arg', `APP_COMMIT=${'c0ffee'.repeat(6)}c0ff`, '--build-arg', 'APP_BUILT_AT=2026-01-02T03:04:05Z', join(dir, svc)], { cwd: dir, timeout: 900_000 })
+          const pinned = (await run(log, 'docker', ['run', '-d', '-p', '127.0.0.1::3000', '-e', 'APP_IMAGE_TAG=20260131-235959-abc1234', ...imageDb, exact], { cwd: dir, timeout: 60_000 })).out.trim()
+          containers.add(pinned)
+          const at = (await run(log, 'docker', ['port', pinned, '3000/tcp'], { cwd: dir, timeout: 15_000 })).out.trim().split('\n')[0]
+          const built = await (await waitFor(`http://${at}/version`, 40_000)).json()
+          if (built.commit !== `${'c0ffee'.repeat(6)}c0ff` || built.builtAt !== '2026-01-02T03:04:05Z') throw new StepError(`/version with build args: ${JSON.stringify(built)}`)
+          await run(log, 'docker', ['rm', '-f', pinned], { cwd: dir, timeout: 60_000 })
+          containers.delete(pinned)
+          await dockerImage(log, ['rmi', '-f', exact], { cwd: dir, timeout: 60_000 })
+          images.delete(exact)
+        }
         const user = (await run(log, 'docker', ['exec', cid, 'id', '-un'], { cwd: dir, timeout: 15_000 })).out.trim()
         if (user !== 'node') throw new StepError(`container runs as "${user}", expected "node"`)
         await run(log, 'docker', ['rm', '-f', cid], { cwd: dir, timeout: 60_000 })

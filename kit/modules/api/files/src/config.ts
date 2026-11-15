@@ -20,8 +20,10 @@ const shape = {
   // 1 = continue the trace (`traceparent`) of ANY caller. Only for an API that untrusted clients cannot reach: the
   // trace id is written into audit rows and logs. Default: only requests through the trusted proxy (auth module).
   TRUST_TRACEPARENT: z.enum(['0', '1']).default('0'),
+  // What GET /version reports (src/kit/api/build-info.ts): build args of the image, or the deployed image tag.
   APP_COMMIT: z.string().optional(),
   APP_BUILT_AT: z.string().optional(),
+  APP_IMAGE_TAG: z.string().optional(),
   // @kit:if notify
   // The notification hub (POST <url>/notify). Empty = notifications are off.
   NOTIFIER_URL: z.string().url().optional(),

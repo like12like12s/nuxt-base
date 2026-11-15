@@ -2,9 +2,13 @@
 // The locked API runtime (kit/runtime/api/**) — the API standard itself, tested at the source.
 import { createRoute, z } from '@hono/zod-openapi'
 import { HTTPException } from 'hono/http-exception'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import rootPkg from '../../package.json'
 import { API_V1, createApi, mountV1, openApiDocument, stringifyOpenApi } from '../runtime/api/app'
+import { buildInfo, commitFromTag } from '../runtime/api/build-info'
 import { currentActor, currentTraceId, getContext, parseTraceparent, resolveTraceId, runWithContext, setTraceIdProvider } from '../runtime/api/context'
 import { ApiError, ERROR_CODES, codeForStatus, conflict, errorBody, errorResponses, forbidden, notFound, rateLimited, unauthorized, validation } from '../runtime/api/errors'
 import { CHECK_TIMEOUT_MS, HealthCheckError, runChecks, type HealthCheck } from '../runtime/api/health'
@@ -23,6 +27,42 @@ function setup(checks: HealthCheck[] = [], options: Partial<Parameters<typeof cr
 }
 
 afterEach(() => setTraceIdProvider(() => undefined))
+
+// Finding #11: /version of a deployed image said commit "unknown", builtAt "unknown".
+describe('build info (commit + builtAt of /version)', () => {
+  const stampDir = mkdtempSync(join(tmpdir(), 'nuxt-base-kit-test-build-'))
+  afterAll(() => rmSync(stampDir, { recursive: true, force: true }))
+  const stamp = (content: string) => {
+    const file = join(stampDir, `stamp-${Math.abs(content.length)}-${content.replace(/\W/g, '').slice(0, 12)}.txt`)
+    writeFileSync(file, content)
+    return file
+  }
+  const none = join(stampDir, 'missing.txt')
+
+  it('the commit comes from APP_COMMIT, else from the end of the deployed image tag', () => {
+    expect(commitFromTag('20261116-041249-dc3a444')).toBe('dc3a444')
+    expect(commitFromTag('20261116-041249-dc3a444-dirty')).toBe('dc3a444-dirty')
+    expect(commitFromTag(`20261116-041249-${'a1'.repeat(20)}`)).toBe('a1'.repeat(20))
+    expect(commitFromTag('release_abc1234')).toBe('abc1234')
+    for (const tag of [undefined, '', '  ', 'latest', '20261116-041249', 'v1-20261116', 'gate-123-4', '1.2.3', 'feature-branch']) expect(commitFromTag(tag), String(tag)).toBeUndefined()
+    expect(buildInfo({ commit: ' abc ', imageTag: '20261116-041249-dc3a444', stampFile: none })).toEqual({ commit: 'abc' })
+    expect(buildInfo({ commit: '', imageTag: '20261116-041249-dc3a444', stampFile: none })).toEqual({ commit: 'dc3a444' })
+    expect(buildInfo({ stampFile: none })).toEqual({})
+  })
+
+  it('builtAt comes from APP_BUILT_AT, else from the stamp the image build wrote — never from something that is not a time', () => {
+    expect(buildInfo({ builtAt: '2026-01-02T03:04:05Z', stampFile: stamp('2026-11-16T04:12:49Z\n') })).toEqual({ builtAt: '2026-01-02T03:04:05Z' })
+    expect(buildInfo({ builtAt: '', stampFile: stamp('2026-11-16T04:12:49Z\n') })).toEqual({ builtAt: '2026-11-16T04:12:49Z' })
+    expect(buildInfo({ stampFile: stamp('not a time') })).toEqual({})
+    expect(buildInfo({})).toEqual({}) // under tsx / vitest there is no stamp next to the code
+  })
+
+  it('/version: unknown only when nothing is known', async () => {
+    const version = async (build: object) => (await testClient(createApi({ name: 'svc', version: '1.2.3', logger: createLogger('error', () => {}), build })).get('/version')).body
+    expect(await version(buildInfo({ imageTag: '20261116-041249-dc3a444', stampFile: stamp('2026-11-16T04:12:49Z') }))).toMatchObject({ commit: 'dc3a444', builtAt: '2026-11-16T04:12:49Z' })
+    expect(await version(buildInfo({ stampFile: none }))).toMatchObject({ commit: 'unknown', builtAt: 'unknown' })
+  })
+})
 
 describe('kit version', () => {
   it('KIT_VERSION (what GET /version reports) equals the repo version — bump both with every release', () => {

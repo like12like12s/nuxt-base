@@ -3,7 +3,8 @@
 ```
 GET /health/live     the process is up — touches nothing else (container HEALTHCHECK)
 GET /health/ready    database reachable + schema == code -> 200, otherwise 503 with the failing checks
-GET /version         name, version, commit, builtAt, kit
+GET /version         name, version, commit, builtAt, kit — commit / builtAt: APP_COMMIT / APP_BUILT_AT, in an image
+                     also the deployed tag and the build stamp (`src/kit/api/build-info.ts`); `unknown` in dev
 GET /openapi.json    the contract (same content as the committed openapi.json)
 /api/v1/<resource>   the app's resources — plural, kebab-case; a breaking change goes to /api/v2
 ```

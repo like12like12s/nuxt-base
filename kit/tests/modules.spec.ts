@@ -73,7 +73,7 @@ describe('kind api --with api,db', () => {
   it('locks the runtime under src/kit/{api,db,testing} — byte for byte, with the DO NOT EDIT header', () => {
     expect(r.json.locked).toEqual([
       'scripts/gate-ci.mjs',
-      ...['app', 'context', 'env', 'errors', 'health', 'kit-version', 'log', 'pagination', 'shutdown'].map((f) => `src/kit/api/${f}.ts`),
+      ...['app', 'build-info', 'context', 'env', 'errors', 'health', 'kit-version', 'log', 'pagination', 'shutdown'].map((f) => `src/kit/api/${f}.ts`),
       ...['checks', 'cli', 'clock', 'connect', 'migrate', 'mysql', 'repo', 'resilient', 'schema', 'sqlite'].map((f) => `src/kit/db/${f}.ts`),
       ...['client', 'factory', 'test-db'].map((f) => `src/kit/testing/${f}.ts`),
     ])
@@ -211,6 +211,22 @@ describe('container preset with the db module', () => {
       expect(env, kind).toContain('\nDATABASE_URL=sqlite:./data/demo-app.db\n')
       expect(env, kind).toContain('\nDB_MIGRATE_ON_DEPLOY=1\n')
     }
+  })
+
+  // Finding #11: /version of a deployed image must say which build it is, with the deploy script unchanged.
+  it('the API image and the compose file carry what /version reports: build args, a build stamp, the deployed tag', () => {
+    for (const kind of ['api', 'fullstack']) {
+      const { dir } = scaffold(['--kind', kind, '--with', 'api,db', '--deploy', 'container'])
+      const dockerfile = read(dir, kind === 'api' ? 'Dockerfile' : 'api/Dockerfile')
+      expect(dockerfile, kind).toContain('RUN npm run build && date -u +%Y-%m-%dT%H:%M:%SZ > dist/build-time.txt')
+      expect(dockerfile, kind).toMatch(/\nARG APP_COMMIT=\nARG APP_BUILT_AT=\nENV APP_COMMIT=\$\{APP_COMMIT\} APP_BUILT_AT=\$\{APP_BUILT_AT\}\n/)
+      expect(read(dir, 'docker/docker-compose.yml'), kind).toMatch(/\n  api:\n(?:.*\n)*?    environment:\n      APP_IMAGE_TAG: \$\{API_TAG:-\}/)
+      const api = kind === 'api' ? '' : 'api/'
+      expect(read(dir, `${api}src/app.ts`)).toContain('build: buildInfo({ commit: config.APP_COMMIT, builtAt: config.APP_BUILT_AT, imageTag: config.APP_IMAGE_TAG }),')
+      expect(read(dir, `${api}src/config.ts`)).toContain('APP_IMAGE_TAG: z.string().optional(),')
+    }
+    // an API without the standard has no /version, but its compose file is the same shape
+    expect(read(scaffold(['--kind', 'api', '--deploy', 'container']).dir, 'docker/docker-compose.yml')).toContain('APP_IMAGE_TAG: ${API_TAG:-}')
   })
 
   it('without the db module nothing changes', () => {
