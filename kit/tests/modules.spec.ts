@@ -94,7 +94,8 @@ describe('kind api --with api,db', () => {
       'db:migrate': 'tsx --env-file-if-exists=.env src/db/cli.ts migrate',
       'db:seed': 'tsx --env-file-if-exists=.env src/db/cli.ts seed',
       'db:check': 'tsx --env-file-if-exists=.env src/db/cli.ts check',
-      gate: 'npm run typecheck && npm run test',
+      lint: 'oxlint --deny-warnings',
+      gate: 'npm run typecheck && npm run lint && npm run test',
     })
     expect(JSON.stringify(pkg)).not.toMatch(/better-sqlite3|prisma|drizzle/) // SQLite = node:sqlite, nothing to compile
   })

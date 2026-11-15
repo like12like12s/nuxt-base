@@ -1,0 +1,3 @@
+{
+  "ignorePatterns": [".nuxt", ".output", ".wrangler", "dist", "node_modules", "playwright-report", "test-results"]
+}

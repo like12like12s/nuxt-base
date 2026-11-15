@@ -6,7 +6,7 @@ Scaffolded with the nuxt-base kit {{kit.kitVersion}} — kind `{{kit.kind}}`, mo
 
 ```bash
 npm install
-npm run gate        # typecheck + unit tests — must pass before every push and deploy
+npm run gate        # typecheck + lint + unit tests — must pass before every push and deploy
 npm run gate:ci     # gate + gitleaks + npm audit --audit-level=high
 ```
 

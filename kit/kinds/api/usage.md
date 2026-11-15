@@ -5,7 +5,7 @@ cd {{kit.apiDir}}
 cp .env.example .env        # PORT is required — the API refuses to boot without it and names the missing key
 npm run dev                 # tsx watch on :{{kit.apiPort}}
 npm run build && npm start  # dist/index.js
-npm run gate                # typecheck + unit tests
+npm run gate                # typecheck + lint (oxlint) + unit tests
 ```
 
 - `src/app.ts` creates the hono app (routes go here) · `src/config.ts` is the env schema · `src/index.ts` boots it.

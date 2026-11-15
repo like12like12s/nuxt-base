@@ -1,19 +1,27 @@
 {
   "name": "api",
   "description": "hono API on Node: zod env schema that fails fast at boot, /health/live, JSON request log, graceful shutdown, vitest",
-  "parts": [{ "type": "api", "dir": "" }],
+  "parts": [
+    {
+      "type": "api",
+      "dir": ""
+    }
+  ],
   "contributes": {
     "api": {
       "package": {
         "type": "module",
-        "engines": { "node": ">=24" },
+        "engines": {
+          "node": ">=24"
+        },
         "scripts": {
           "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
           "build": "tsc -p tsconfig.build.json",
           "start": "node --env-file-if-exists=.env dist/index.js",
           "typecheck": "tsc --noEmit",
+          "lint": "oxlint --deny-warnings",
           "test": "vitest run",
-          "gate": "npm run typecheck && npm run test"
+          "gate": "npm run typecheck && npm run lint && npm run test"
         },
         "dependencies": {
           "@hono/node-server": "^2.1.8",
@@ -24,26 +32,82 @@
           "@types/node": "^24.19.2",
           "tsx": "^4.23.15",
           "typescript": "^7.0.2",
-          "vitest": "^5.1.0"
+          "vitest": "^5.1.0",
+          "oxlint": "^1.93.0"
         }
       },
       "env": [
-        { "key": "PORT", "required": true, "secret": false, "example": "{{kit.port}}", "description": "Port the API listens on" },
-        { "key": "HOST", "required": false, "secret": false, "example": "0.0.0.0", "description": "Bind address" },
-        { "key": "NODE_ENV", "required": false, "secret": false, "example": "development", "description": "development | test | production" },
-        { "key": "LOG_LEVEL", "required": false, "secret": false, "example": "info", "description": "debug | info | warn | error" }
+        {
+          "key": "PORT",
+          "required": true,
+          "secret": false,
+          "example": "{{kit.port}}",
+          "description": "Port the API listens on"
+        },
+        {
+          "key": "HOST",
+          "required": false,
+          "secret": false,
+          "example": "0.0.0.0",
+          "description": "Bind address"
+        },
+        {
+          "key": "NODE_ENV",
+          "required": false,
+          "secret": false,
+          "example": "development",
+          "description": "development | test | production"
+        },
+        {
+          "key": "LOG_LEVEL",
+          "required": false,
+          "secret": false,
+          "example": "info",
+          "description": "debug | info | warn | error"
+        }
       ],
       "files": [
-        { "from": "files", "to": "" },
-        { "from": "files-plain", "to": "", "when": { "without": ["api"] } }
+        {
+          "from": "files",
+          "to": ""
+        },
+        {
+          "from": "files-plain",
+          "to": "",
+          "when": {
+            "without": [
+              "api"
+            ]
+          }
+        }
       ],
       "locked": [
-        { "from": "runtime/api/context.ts", "to": "src/kit/api/context.ts" },
-        { "from": "runtime/api/env.ts", "to": "src/kit/api/env.ts" },
-        { "from": "runtime/api/log.ts", "to": "src/kit/api/log.ts" },
-        { "from": "runtime/api/shutdown.ts", "to": "src/kit/api/shutdown.ts" }
+        {
+          "from": "runtime/api/context.ts",
+          "to": "src/kit/api/context.ts"
+        },
+        {
+          "from": "runtime/api/env.ts",
+          "to": "src/kit/api/env.ts"
+        },
+        {
+          "from": "runtime/api/log.ts",
+          "to": "src/kit/api/log.ts"
+        },
+        {
+          "from": "runtime/api/shutdown.ts",
+          "to": "src/kit/api/shutdown.ts"
+        }
       ],
-      "gitignore": ["node_modules/", "dist/", ".env", "*.log", "*.tsbuildinfo", "data/", "*.db"],
+      "gitignore": [
+        "node_modules/",
+        "dist/",
+        ".env",
+        "*.log",
+        "*.tsbuildinfo",
+        "data/",
+        "*.db"
+      ],
       "usage": "usage.md"
     }
   }

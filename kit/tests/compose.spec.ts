@@ -222,3 +222,16 @@ describe('new — determinism and purity', () => {
     expect(Object.keys(snapshot(parent)).every((p) => p.startsWith('app/'))).toBe(true)
   })
 })
+
+describe('lint step of the generated gate', () => {
+  it.each([['api', ['']], ['nuxt-app', ['']], ['fullstack', ['api/', 'ui/']]])('%s: every part lints with oxlint (warnings fail) between typecheck and tests, ignoring build output', (kind, parts) => {
+    const { dir } = scaffold(['--kind', kind])
+    for (const part of parts) {
+      const pkg = JSON.parse(read(dir, `${part}package.json`))
+      expect(pkg.scripts.lint, part).toBe('oxlint --deny-warnings')
+      expect(pkg.scripts.gate, part).toBe('npm run typecheck && npm run lint && npm run test')
+      expect(pkg.devDependencies.oxlint, part).toBeTruthy()
+      expect(JSON.parse(read(dir, `${part}.oxlintrc.json`)).ignorePatterns, part).toEqual(expect.arrayContaining(['.nuxt', '.output', 'dist', 'node_modules']))
+    }
+  })
+})

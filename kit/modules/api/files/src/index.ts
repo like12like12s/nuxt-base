@@ -30,7 +30,7 @@ try {
 } catch (err) {
   // A setting that is well-formed but wrong (a wildcard CORS origin, dev auth in production) stops the boot and says
   // why — these errors carry a message that is safe to print; anything else is a bug and keeps its stack.
-  if (!(err instanceof Error) || !/ConfigError$/.test(err.name)) throw err
+  if (!(err instanceof Error) || !err.name.endsWith('ConfigError')) throw err
   console.error(err.message)
   process.exit(1)
 }

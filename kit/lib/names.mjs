@@ -9,7 +9,7 @@ export function singular(kebab) {
   if (['news', 'series', 'species'].includes(last)) one = last
   else if (/[^aeiou]ies$/.test(last)) one = last.slice(0, -3) + 'y'
   else if (/(ches|shes|sses|xes|zes|uses)$/.test(last)) one = last.slice(0, -2)
-  else if (/s$/.test(last) && !/(ss|us|is)$/.test(last)) one = last.slice(0, -1)
+  else if (last.endsWith('s') && !/(ss|us|is)$/.test(last)) one = last.slice(0, -1)
   return [...parts, one].join('-')
 }
 

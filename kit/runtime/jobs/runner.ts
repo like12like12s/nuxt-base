@@ -158,7 +158,7 @@ export async function runJob<DB>(job: Job<DB>, deps: RunJobDeps<DB>): Promise<nu
         logger.error('job end', { job: job.name, status: 'timeout', ms: now() - started, timeoutMs })
         return JOB_EXIT.TIMEOUT
       }
-      logger.info('job end', { job: job.name, status: 'ok', ms: now() - started, changed: 0, ...(outcome.result ?? {}) })
+      logger.info('job end', { job: job.name, status: 'ok', ms: now() - started, changed: 0, ...outcome.result })
       return JOB_EXIT.OK
     } catch (error) {
       logger.error('job end', { job: job.name, status: 'failed', ms: now() - started, error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined })

@@ -6,7 +6,7 @@ const SORTED = new Set(['dependencies', 'devDependencies', 'engines'])
 // Merge package.json fragments in unit order: objects merge key by key (later unit wins), scalars are replaced.
 export function mergePackage(target, fragment) {
   for (const [key, value] of Object.entries(fragment ?? {})) {
-    if (value && typeof value === 'object' && !Array.isArray(value)) target[key] = { ...(target[key] ?? {}), ...value }
+    if (value && typeof value === 'object' && !Array.isArray(value)) target[key] = { ...target[key], ...value }
     else target[key] = value
   }
   return target

@@ -14,7 +14,9 @@
     "test:e2e": "playwright test",
     "test:templates": "scripts/sync-templates.sh --check",
     "test": "npm run build && npm run test:unit && npm run test:e2e && npm run test:templates",
-    "gate": "npm run typecheck && npm test",
+    "lint": "oxlint --deny-warnings kit/runtime kit/lib kit/bin",
+    "gate": "npm run typecheck && npm run lint && npm test",
+    "gate:ci": "node kit/runtime/project/gate-ci.mjs",
     "gate:kit": "node kit/tests/kit-gate.mjs"
   },
   "devDependencies": {
@@ -33,6 +35,7 @@
     "kysely": "^0.29.9",
     "mysql2": "^3.24.6",
     "nuxt": "^4.6.4",
+    "oxlint": "^1.93.0",
     "pixelmatch": "^8.0.0",
     "pngjs": "^7.0.0",
     "typescript": "^5.9.0",

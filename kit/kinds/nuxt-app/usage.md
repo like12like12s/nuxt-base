@@ -3,7 +3,7 @@
 ```bash
 cd {{kit.uiDir}}
 npm run dev                 # Nuxt dev server on :{{kit.uiPort}} (LAN)
-npm run gate                # typecheck + unit tests (vitest, nuxt env)
+npm run gate                # typecheck + lint (oxlint) + unit tests (vitest, nuxt env)
 npm run test:e2e            # build, then playwright against the built app (fails on any pageerror / console error)
 npm run build && npm run serve
 ```

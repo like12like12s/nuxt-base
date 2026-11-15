@@ -27,7 +27,7 @@ tests/e2e/<name>.spec.ts            opens the page in the built app; fails on an
 ## Tests that must pass
 
 ```bash
-npm run gate                        # typecheck + unit tests
+npm run gate                        # typecheck + lint + unit tests
 npm run test:e2e                    # in the UI directory: builds, then playwright against the built app
 ```
 

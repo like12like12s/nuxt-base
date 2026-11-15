@@ -9,7 +9,7 @@ description: How to run, test and deploy {{kit.name}}
 ## Checks
 
 ```bash
-npm run gate        # typecheck -> unit tests. Runs on every push (pre-push hook) and before every deploy.
+npm run gate        # typecheck -> lint (oxlint, warnings fail) -> unit tests. Before every push and every deploy.
 npm run gate:ci     # gate + gitleaks (skipped with a notice when the binary is absent) + npm audit --audit-level=high
 ```
 
