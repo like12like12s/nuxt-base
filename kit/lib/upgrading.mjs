@@ -27,7 +27,7 @@ export function parseUpgrading(text) {
       sections.push(current)
     } else if (/^#{1,2}\s/.test(line)) current = null
     else if (!current) continue
-    else if (/^- /.test(line)) current.items.push(line.slice(2).trim())
+    else if (line.startsWith('- ')) current.items.push(line.slice(2).trim())
     else if (/^\s+\S/.test(line) && current.items.length) current.items[current.items.length - 1] += ` ${line.trim()}`
   }
   return sections.filter((section) => section.items.length)
