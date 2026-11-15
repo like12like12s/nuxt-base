@@ -29,6 +29,18 @@ services:
       - "${UI_PORT:-{{kit.uiPort}}}:3000"
     environment:
       API_URL: http://api:3000   # the `api` service over the compose network, no host port involved
+      # @kit:if auth
+      # Auth bridge of the /api proxy: the identity the forward-auth proxy vouches for reaches the API only when the
+      # request's TCP peer is that proxy; then the secret the API expects is added. Both empty = nothing is passed on.
+      AUTH_PROXY_SECRET: ${AUTH_PROXY_SECRET:-}
+      AUTH_BRIDGE_TRUSTED_PROXIES: ${AUTH_BRIDGE_TRUSTED_PROXIES:-}
+      AUTH_HEADER_PRESET: ${AUTH_HEADER_PRESET:-}
+      AUTH_HEADER_USERNAME: ${AUTH_HEADER_USERNAME:-}
+      AUTH_HEADER_UID: ${AUTH_HEADER_UID:-}
+      AUTH_HEADER_EMAIL: ${AUTH_HEADER_EMAIL:-}
+      AUTH_HEADER_NAME: ${AUTH_HEADER_NAME:-}
+      AUTH_HEADER_GROUPS: ${AUTH_HEADER_GROUPS:-}
+      # @kit:end
       # @kit:if og
       NUXT_PUBLIC_SITE_URL: ${SITE_URL:-}            # public origin of the site: og:url / canonical / og:image
       API_SERVICE_TOKEN: ${API_SERVICE_TOKEN:-}      # read-only service token for link previews of record pages

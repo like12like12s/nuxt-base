@@ -255,6 +255,72 @@ async function fullModules(t) {
     if (res.status !== 401) t.fail(`a revoked token still works: ${res.status}`)
   })
 
+  // --- fullstack: the auth bridge of the UI's /api proxy, on the built UI + built API (finding #1) ---------------------
+  // The gate process is the client. Its address (127.0.0.1) is either the configured forward-auth proxy or it is not:
+  // that alone decides whether identity headers count — never a header, never the secret a client sends.
+  if (t.uiDir) {
+    const up = t.port + 8
+    const ui = `http://127.0.0.1:${up}`
+    const viaUi = async (path, headers) => {
+      const res = await fetch(ui + path, { headers, signal: AbortSignal.timeout(8000) })
+      const text = await res.text()
+      let body = null
+      try { body = JSON.parse(text) } catch { body = text }
+      return { status: res.status, body }
+    }
+    const stack = (apiEnv, uiEnv, probe) => t.withServer(node, ['dist/index.js'], { cwd, extraEnv: { ...prod, AUTH_PROXY_SECRET: SECRET, AUTH_ROLE_MAP: JSON.stringify({ 'app-admins': ['admin'] }), ...apiEnv } }, async () => {
+      await t.waitFor(`${base}/health/live`)
+      await t.withServer('npm', ['run', 'serve'], { cwd: t.uiDir, group: true, extraEnv: { PORT: String(up), HOST: '127.0.0.1', NITRO_PORT: String(up), NITRO_HOST: '127.0.0.1', API_URL: base, ...uiEnv } }, async () => {
+        await t.waitFor(`${ui}/`)
+        await probe()
+      })
+    })
+    const authentik = { 'x-authentik-username': 'alice', 'x-authentik-uid': 'uid-alice', 'x-authentik-groups': 'app-admins' }
+    const remote = { 'remote-user': 'rita', 'remote-groups': 'app-admins', 'remote-email': 'rita@example.com' }
+
+    t.begin('auth bridge: through the trusted proxy the identity reaches the API (and a client-sent secret is replaced)')
+    await stack({}, { AUTH_PROXY_SECRET: SECRET, AUTH_BRIDGE_TRUSTED_PROXIES: '127.0.0.1' }, async () => {
+      const me = await viaUi('/api/v1/me', authentik)
+      if (me.status !== 200 || me.body.data.subject !== 'uid-alice' || me.body.data.roles.join() !== 'admin') t.fail(`/me through the bridge: ${me.status} ${JSON.stringify(me.body)}`)
+      const replaced = await viaUi('/api/v1/me', { ...authentik, 'x-auth-proxy-secret': 'guess' })
+      if (replaced.status !== 200) t.fail(`a client-sent secret was forwarded instead of replaced: ${replaced.status}`)
+      if ((await viaUi('/api/v1/me', {})).status !== 401) t.fail('no identity through the proxy must stay anonymous')
+      // the names of the other preset are not an identity here, even from the trusted peer
+      if ((await viaUi('/api/v1/me', remote)).status !== 401) t.fail('Remote-* headers were believed although the preset is authentik')
+    })
+
+    t.begin('auth bridge: spoofing — from any other peer, identity headers and even the REAL secret are stripped (401); a bearer token still works')
+    for (const uiEnv of [
+      { AUTH_PROXY_SECRET: SECRET, AUTH_BRIDGE_TRUSTED_PROXIES: '192.0.2.10' }, // the proxy is somewhere else
+      { AUTH_PROXY_SECRET: SECRET }, // only one of the two settings
+      { AUTH_BRIDGE_TRUSTED_PROXIES: '127.0.0.1' },
+      {}, // nothing configured
+    ]) {
+      await stack({}, uiEnv, async () => {
+        for (const headers of [authentik, { ...authentik, 'x-auth-proxy-secret': SECRET }, { ...remote, 'x-auth-proxy-secret': SECRET }, { 'X-Authentik-Username': 'mallory', 'X-Auth-Proxy-Secret': SECRET, 'x-forwarded-for': '127.0.0.1' }]) {
+          const res = await viaUi('/api/v1/me', headers)
+          if (res.status !== 401) t.fail(`spoofed identity accepted with UI env ${JSON.stringify(Object.keys(uiEnv))}: ${res.status} ${JSON.stringify(res.body)} for ${JSON.stringify(Object.keys(headers))}`)
+        }
+        const token = await viaUi('/api/v1/me', { authorization: `Bearer ${readerToken}`, ...authentik })
+        if (token.status !== 200 || token.body.data.kind !== 'service') t.fail(`a service token through the UI: ${token.status} ${JSON.stringify(token.body)}`)
+      })
+    }
+
+    t.begin('auth bridge: header preset `remote` on both sides — Remote-User is the identity, X-Authentik-* is not')
+    await stack({ AUTH_HEADER_PRESET: 'remote' }, { AUTH_PROXY_SECRET: SECRET, AUTH_BRIDGE_TRUSTED_PROXIES: '127.0.0.0/8', AUTH_HEADER_PRESET: 'remote' }, async () => {
+      const me = await viaUi('/api/v1/me', remote)
+      if (me.status !== 200 || me.body.data.subject !== 'rita' || me.body.data.email !== 'rita@example.com' || me.body.data.roles.join() !== 'admin') t.fail(`/me with the remote preset: ${me.status} ${JSON.stringify(me.body)}`)
+      if ((await viaUi('/api/v1/me', authentik)).status !== 401) t.fail('X-Authentik-* headers were believed although the preset is remote')
+    })
+    // …and straight at the API, around the UI: the same headers without the secret are nobody
+    await t.withServer(node, ['dist/index.js'], { cwd, extraEnv: { ...prod, AUTH_PROXY_SECRET: SECRET, AUTH_HEADER_PRESET: 'remote' } }, async () => {
+      await t.waitFor(`${base}/health/live`)
+      if ((await call('/api/v1/me', { headers: remote })).status !== 401) t.fail('Remote-* headers without the secret were believed by the API')
+    })
+    const badPreset = await t.run(node, ['dist/index.js'], { cwd, timeout: 20_000, extraEnv: { ...prod, AUTH_HEADER_PRESET: 'nope' }, expect: 1 })
+    if (!/AUTH_HEADER_PRESET/.test(badPreset.out)) t.fail('an unknown header preset did not stop the boot with a clear message')
+  }
+
   // --- playbooks: one generator command each, then the project must still be green ------------------------------------
   t.begin('playbooks: copied into the project')
   for (const name of ['add-resource', 'add-job', ...(t.uiDir ? ['add-page'] : [])]) {

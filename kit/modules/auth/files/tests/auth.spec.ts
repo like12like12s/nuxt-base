@@ -132,6 +132,16 @@ describe('who is believed', () => {
     expect(await t.db.selectFrom('users').select('id').execute()).toEqual([])
   })
 
+  it('AUTH_HEADER_PRESET=remote: Remote-User / Remote-Groups are the identity — under the same rule — and X-Authentik-* is not', async () => {
+    const { app } = t.build({}, { ...REAL, AUTH_HEADER_PRESET: 'remote' })
+    const remote = { 'remote-user': 'alice', 'remote-email': 'alice@example.com', 'remote-groups': 'app-admins' }
+    const me = await testClient(app, { headers: { ...remote, [PROXY_SECRET_HEADER]: SECRET } }).get('/api/v1/me')
+    expect(me.body.data).toMatchObject({ subject: 'alice', email: 'alice@example.com', roles: ['admin'], kind: 'user' })
+    expect((await testClient(app, { headers: remote }).get('/api/v1/me')).status).toBe(401) // no secret: not through the proxy
+    expect((await testClient(app, { headers: fromProxy('alice', 'app-admins') }).get('/api/v1/me')).status).toBe(401) // the other preset's names
+    expect(() => t.build({}, { ...REAL, AUTH_HEADER_PRESET: 'nope' })).toThrow(AuthConfigError)
+  })
+
   it('without AUTH_PROXY_SECRET / AUTH_TRUSTED_PROXIES the headers are never believed (fail closed)', async () => {
     const { app } = t.build({}, { AUTH_DEV_MODE: '0', NODE_ENV: 'production' })
     expect((await testClient(app, { headers: fromProxy('alice', 'app-admins') }).get('/api/v1/me')).status).toBe(401)

@@ -46,6 +46,15 @@ const shape = {
   // Forward-auth headers are believed only with one of these two (see usage.md, "Auth"). Neither = service tokens only.
   AUTH_PROXY_SECRET: z.string().min(16).optional(),
   AUTH_TRUSTED_PROXIES: z.string().optional(),
+  // Which headers the forward-auth proxy puts the identity in: preset `authentik` (X-Authentik-*, the default) or
+  // `remote` (Remote-User / Remote-Groups / Remote-Email / Remote-Name); single names can be overridden.
+  AUTH_HEADER_PRESET: z.string().optional(),
+  AUTH_HEADER_USERNAME: z.string().optional(),
+  AUTH_HEADER_UID: z.string().optional(),
+  AUTH_HEADER_EMAIL: z.string().optional(),
+  AUTH_HEADER_NAME: z.string().optional(),
+  AUTH_HEADER_GROUPS: z.string().optional(),
+  AUTH_HEADER_GROUPS_SEPARATOR: z.string().max(3).optional(),
   AUTH_ROLE_MAP: z.string().optional(),
   AUTH_DEV_MODE: z.enum(['0', '1']).default('0'),
   // @kit:end

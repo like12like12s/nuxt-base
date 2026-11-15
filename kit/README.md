@@ -362,9 +362,17 @@ testkit   deterministic factories (seeded random, fixed clock, sequential ids) �
 auth      identity from three sources, in this order: the fixed dev user (AUTH_DEV_MODE=1 — createAuth() throws with
           NODE_ENV=production, so the process does not start) · `Authorization: Bearer kit_…` service tokens (256
           random bits, shown once, sha256 in `service_tokens`, roles, expiry, revoke, lastUsedAt, compared in constant
-          time; `npm run auth:token -- create|revoke|list`) · Authentik forward-auth headers, believed ONLY when the
-          request provably came through the proxy: the shared secret header `x-auth-proxy-secret` (AUTH_PROXY_SECRET)
-          and/or the TCP peer in AUTH_TRUSTED_PROXIES — neither configured = the headers are never believed.
+          time; `npm run auth:token -- create|revoke|list`; without `--roles` = authenticated, read-only) · identity
+          headers of the forward-auth proxy — which ones is configuration: AUTH_HEADER_PRESET `authentik` (default,
+          X-Authentik-*) or `remote` (Remote-User / Remote-Groups / Remote-Email / Remote-Name), single names through
+          AUTH_HEADER_USERNAME / _UID / _EMAIL / _NAME / _GROUPS — believed ONLY when the request provably came
+          through the proxy: the shared secret header `x-auth-proxy-secret` (AUTH_PROXY_SECRET) and/or the TCP peer
+          in AUTH_TRUSTED_PROXIES — neither configured = the headers are never believed.
+          fullstack: the proxy talks to the UI, so the UI's /api proxy carries the auth bridge (locked
+          server/kit/auth-bridge.ts): identity and secret headers a client sent are ALWAYS removed, and only when the
+          request's TCP peer is the configured forward-auth proxy (AUTH_BRIDGE_TRUSTED_PROXIES) are the proxy's
+          identity headers passed on and the secret added — the same rule one hop earlier; with either setting
+          missing nothing is passed on.
           Trusted users are upserted into `users` (written and audited on change only); roles are the app's own
           (src/auth/roles.ts), mapped from identity-provider groups by AUTH_ROLE_MAP.
           Every route declares who may call it — `publicRoute()` / `requireAuth()` / `requireRole(…)` as route
@@ -373,7 +381,8 @@ auth      identity from three sources, in this order: the fixed dev user (AUTH_D
           `undeclaredRoutes(app)`, which the generated tests/auth.spec.ts requires to be empty next to its
           role x endpoint matrix (which must name every route). GET /api/v1/me returns the caller; in a UI the
           layer's useAuth() reads it. kinds api / fullstack (brings api + db) and nuxt-app (UI wiring only).
-          Nothing here creates identity-provider or proxy configuration: usage.md tells the operator what to set up.
+          Nothing here creates identity-provider or proxy configuration: usage.md tells the operator what to set up,
+          in terms of "the forward-auth proxy" and the header preset (a hand-written proxy config is one example).
 trace     OpenTelemetry (sdk-trace 3.x) -> OTLP/HTTP. Off until OTEL_EXPORTER_OTLP_ENDPOINT is set. One SERVER span
           per request from a hono middleware (`createApi({ before: [traceMiddleware()] })`) — nothing is patched, so
           it is ESM-safe without a loader flag; src/tracing.ts is the first import of src/index.ts. The span's trace
@@ -480,7 +489,11 @@ data-layer unit tests there.
 
 Task E combos: `fullstack+full` and `api+full+container` scaffold every module, then prove on the built app with
 NODE_ENV=production: dev mode and a wildcard CORS origin stop the boot; anonymous = 401; forward-auth headers without
-the proxy secret = 401; a user through the proxy gets the mapped roles; a role matrix over HTTP; a service token
+the proxy secret = 401; fullstack, built UI in front of the built API: identity headers reach the API only when the
+client's address is the configured proxy of the auth bridge — from any other peer they are stripped even together
+with the REAL secret, with one of the two bridge settings missing, and with nothing configured (always 401), a
+bearer token passes untouched, and with the `remote` header preset on both sides Remote-User is the identity while
+X-Authentik-* is not; a user through the proxy gets the mapped roles; a role matrix over HTTP; a service token
 created with the built CLI works and is 401 after `revoke`; secure headers, the CORS allowlist and the body limit;
 a span reaches a collector with the trace id of the response and of the log line. Then they run the three playbook
 generators (`add resource`, `add job`, `add page`), show that the contract test is red until `npm run contract`,

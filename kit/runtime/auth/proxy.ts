@@ -1,9 +1,14 @@
 // DO NOT EDIT — locked file from the nuxt-base kit (runtime/auth/proxy.ts). Its hash is recorded in .scaffold.json;
 // `scaffold check` reports local edits and `scaffold update` overwrites them. Change it in the kit instead.
 //
-// Identity from a forward-auth proxy (Authentik outpost behind Caddy / Traefik / nginx). The proxy authenticates the
-// browser and adds X-Authentik-* headers to the request it forwards. Anyone who can reach this API directly can send
-// the same headers — so they are believed ONLY when the request provably came through the proxy:
+// Identity from a forward-auth proxy (a reverse proxy that asks the identity provider before it forwards). The proxy
+// authenticates the browser and adds identity headers to the request it forwards. Which headers is configuration:
+//   preset `authentik` (default)   X-Authentik-Username / -Uid / -Email / -Name / -Groups
+//   preset `remote`                Remote-User / Remote-Email / Remote-Name / Remote-Groups (no uid: the user name is
+//                                  the stable subject)
+//   or any single name on its own (identityHeaders()).
+// Anyone who can reach this API directly can send the same headers — so they are believed ONLY when the request
+// provably came through the proxy:
 //   secret           the proxy adds `x-auth-proxy-secret: <AUTH_PROXY_SECRET>` (and strips it from client requests)
 //   trustedProxies   the TCP peer is one of these addresses / CIDR ranges (AUTH_TRUSTED_PROXIES)
 // Whatever is configured must hold (both = both). Nothing configured = the headers are never believed (fail closed).
@@ -12,6 +17,49 @@ import { BlockList, isIP } from 'node:net'
 
 export const PROXY_SECRET_HEADER = 'x-auth-proxy-secret'
 export const IDENTITY_HEADERS = ['x-authentik-username', 'x-authentik-uid', 'x-authentik-email', 'x-authentik-name', 'x-authentik-groups'] as const
+
+/** Which request header carries which part of the identity (lower-case). Only `username` is mandatory. */
+export interface IdentityHeaderNames {
+  username: string
+  uid?: string
+  email?: string
+  name?: string
+  groups?: string
+}
+
+export const HEADER_PRESETS = {
+  authentik: { username: 'x-authentik-username', uid: 'x-authentik-uid', email: 'x-authentik-email', name: 'x-authentik-name', groups: 'x-authentik-groups' },
+  remote: { username: 'remote-user', email: 'remote-email', name: 'remote-name', groups: 'remote-groups' },
+} as const satisfies Record<string, IdentityHeaderNames>
+export type HeaderPreset = keyof typeof HEADER_PRESETS
+
+/** Every header name any preset uses — what a hop in front of the API strips from a request it does not trust. */
+export const KNOWN_IDENTITY_HEADERS: readonly string[] = [...new Set(Object.values(HEADER_PRESETS).flatMap((names) => Object.values(names)))]
+
+const HEADER_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/
+// Headers that mean something else on every request: naming one of them as an identity header would let any client
+// (or any ordinary proxy) "sign in" by sending it.
+const NEVER_IDENTITY = new Set(['authorization', 'cookie', 'host', 'user-agent', 'referer', 'origin', 'x-forwarded-for', 'x-forwarded-host', 'x-real-ip', 'forwarded', 'traceparent', 'content-type'])
+
+/**
+ * The identity header names from configuration: a preset (AUTH_HEADER_PRESET, default `authentik`) with any single
+ * name overridden (AUTH_HEADER_USERNAME, …_UID, …_EMAIL, …_NAME, …_GROUPS). Throws AuthConfigError on an unknown
+ * preset or a name that is not a plain header name — a typo must stop the boot, not quietly accept nobody.
+ */
+export function identityHeaders(options: { preset?: string; username?: string; uid?: string; email?: string; name?: string; groups?: string } = {}): IdentityHeaderNames {
+  const preset = (options.preset?.trim() || 'authentik').toLowerCase()
+  if (!Object.hasOwn(HEADER_PRESETS, preset)) throw new AuthConfigError(`AUTH_HEADER_PRESET: "${options.preset}" is not a preset (${Object.keys(HEADER_PRESETS).join(', ')})`)
+  const names: IdentityHeaderNames = { ...HEADER_PRESETS[preset as HeaderPreset] }
+  for (const key of ['username', 'uid', 'email', 'name', 'groups'] as const) {
+    const given = options[key]?.trim().toLowerCase()
+    if (!given) continue
+    if (!HEADER_NAME.test(given) || NEVER_IDENTITY.has(given) || given === PROXY_SECRET_HEADER) throw new AuthConfigError(`AUTH_HEADER_${key.toUpperCase()}: "${options[key]}" cannot be used as an identity header`)
+    names[key] = given
+  }
+  const used = Object.values(names)
+  if (new Set(used).size !== used.length) throw new AuthConfigError('AUTH_HEADER_*: two parts of the identity are read from the same header')
+  return names
+}
 
 export class AuthConfigError extends Error {
   constructor(message: string) {
@@ -23,6 +71,10 @@ export class AuthConfigError extends Error {
 export interface ProxyTrust {
   secret?: string
   trustedProxies?: readonly string[]
+  /** Which headers carry the identity. Default: the `authentik` preset. */
+  headers?: IdentityHeaderNames
+  /** What separates the entries of the groups header. Default `|` (set `,` for a proxy that sends a comma list). */
+  groupsSeparator?: string
 }
 
 export interface ProxyIdentity {
@@ -76,6 +128,8 @@ export function proxyAuth(trust: ProxyTrust) {
   const secret = trust.secret?.trim() || undefined
   const sources = trust.trustedProxies?.length ? trustedSources(trust.trustedProxies) : undefined
   const configured = Boolean(secret || sources)
+  const names = trust.headers ?? HEADER_PRESETS.authentik
+  const separator = trust.groupsSeparator || '|'
   const refusal = (header: (name: string) => string | undefined, remoteAddress: string | undefined): 'not-configured' | 'bad-secret' | 'untrusted-source' | null => {
     if (!configured) return 'not-configured'
     if (secret && !safeEqual(header(PROXY_SECRET_HEADER) ?? '', secret)) return 'bad-secret'
@@ -84,19 +138,20 @@ export function proxyAuth(trust: ProxyTrust) {
   }
 
   function read(header: (name: string) => string | undefined, remoteAddress: string | undefined): ProxyResult {
-    const username = header('x-authentik-username')?.trim()
+    const username = header(names.username)?.trim()
     if (!username) return { kind: 'none' }
     const reason = refusal(header, remoteAddress)
     if (reason) return { kind: 'rejected', reason }
-    const value = (name: string) => header(name)?.trim() || undefined
+    const value = (name: string | undefined) => (name ? header(name)?.trim() || undefined : undefined)
     return {
       kind: 'trusted',
       identity: {
-        subject: value('x-authentik-uid') ?? username,
+        // No uid header (the `remote` preset has none): the user name is the stable subject.
+        subject: value(names.uid) ?? username,
         username,
-        email: value('x-authentik-email'),
-        name: value('x-authentik-name'),
-        groups: (header('x-authentik-groups') ?? '').split('|').map((group) => group.trim()).filter(Boolean),
+        email: value(names.email),
+        name: value(names.name),
+        groups: (value(names.groups) ?? '').split(separator).map((group) => group.trim()).filter(Boolean),
       },
     }
   }

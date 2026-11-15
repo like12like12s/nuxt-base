@@ -1,10 +1,10 @@
 // @vitest-environment node
 // What the auth module composes. Its behaviour is tested at the source (runtime-auth.spec.ts) and in the generated
 // project (tests/auth.spec.ts, run by the kit gate).
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { cleanup, cli, read, snapshot, tmp } from './helpers'
+import { KIT_ROOT, cleanup, cli, read, snapshot, tmp } from './helpers'
 
 afterAll(cleanup)
 
@@ -33,6 +33,29 @@ describe('auth module', () => {
       expect(strip).toBeGreaterThan(-1)
       expect(usage).toContain('request_header -x-auth-proxy-secret')
       expect(strip).toBeLessThan(usage.indexOf('forward_auth <outpost>:9000'))
+    })
+
+    // Finding #1 of the first real use: the docs offered a raw Caddy snippet as the only way, for X-Authentik-* only.
+    it('usage.md describes the setup in terms of the forward-auth proxy and the header preset; the Caddy block is one example', () => {
+      const usage = read(dir, '.memory/docs/guides/usage.md')
+      const auth = usage.slice(usage.indexOf('## Auth ('))
+      expect(auth).toContain('"The forward-auth proxy" = the reverse proxy in front of the app')
+      expect(auth).toMatch(/remote\s+Remote-User\s+\(none\)\s+Remote-Email\s+Remote-Name\s+Remote-Groups/)
+      expect(auth).toContain('AUTH_HEADER_PRESET')
+      expect(auth).toContain('do not hand-edit the generated proxy configuration')
+      expect(auth.indexOf('**3. What the proxy must do**')).toBeLessThan(auth.indexOf('app.example.com {'))
+      expect(auth).toContain('one example; nginx and Traefik have the same three steps')
+      expect(auth).not.toMatch(/@kit:/)
+      // an API on its own: the proxy (or its address) is what the API trusts — no bridge
+      expect(auth).toContain('The proxy forwards straight to the API.')
+      expect(auth).not.toContain('auth bridge')
+    })
+
+    it('env: the header preset is configurable; the app-owned wiring passes it to the locked runtime', () => {
+      expect(r.json.env.map((e: any) => e.key)).toContain('AUTH_HEADER_PRESET')
+      expect(read(dir, 'src/config.ts')).toContain('AUTH_HEADER_PRESET: z.string().optional(),')
+      expect(read(dir, 'src/auth/index.ts')).toContain('headers: identityHeaders({')
+      expect(r.json.files.filter((f: string) => f.includes('auth-bridge'))).toEqual([])
     })
 
     it('locks the runtime and adds the app-owned wiring, the /me resource, the token command and the matrix test', () => {
@@ -101,13 +124,52 @@ describe('auth module', () => {
     }
   })
 
+  describe('fullstack: the UI\'s /api proxy carries the auth bridge', () => {
+    const { dir, r } = scaffold(['--kind', 'fullstack', '--with', 'auth', '--deploy', 'container'])
+
+    it('locks the bridge into the UI server and calls it before every forwarded request', () => {
+      expect(r.json.locked).toContain('ui/server/kit/auth-bridge.ts')
+      expect(read(dir, 'ui/server/kit/auth-bridge.ts')).toBe(readFileSync(join(KIT_ROOT, 'runtime/auth/bridge.ts'), 'utf8'))
+      const route = read(dir, 'ui/server/routes/api/[...path].ts')
+      expect(route).toContain("import { authBridgeFromEnv } from '../../kit/auth-bridge'")
+      expect(route.indexOf('bridge(event.node.req.headers, event.node.req.socket.remoteAddress)')).toBeGreaterThan(-1)
+      expect(route.indexOf('bridge(event.node.req.headers')).toBeLessThan(route.indexOf('return proxyRequest('))
+      expect(route).not.toMatch(/@kit:/)
+      expect(r.json.files).toContain('ui/tests/unit/auth-bridge.spec.ts')
+    })
+
+    it('env: the UI needs the secret and the proxy address; compose hands the one .env to both services', () => {
+      const ui = read(dir, 'ui/.env.example')
+      for (const key of ['AUTH_PROXY_SECRET', 'AUTH_BRIDGE_TRUSTED_PROXIES', 'AUTH_HEADER_PRESET']) expect(ui).toMatch(new RegExp(`^${key}=$`, 'm'))
+      expect(ui).not.toContain('AUTH_TRUSTED_PROXIES=') // that one is the API's
+      const compose = read(dir, 'docker/docker-compose.yml')
+      const uiService = compose.slice(compose.indexOf('\n  ui:\n'))
+      for (const key of ['AUTH_PROXY_SECRET', 'AUTH_BRIDGE_TRUSTED_PROXIES', 'AUTH_HEADER_PRESET', 'AUTH_HEADER_GROUPS']) expect(uiService).toContain(`      ${key}: \${${key}:-}`)
+      const env = read(dir, 'docker/env.example')
+      expect(env).toMatch(/^AUTH_BRIDGE_TRUSTED_PROXIES=$/m)
+      expect(env).toContain('Leave AUTH_TRUSTED_PROXIES empty here')
+    })
+
+    it('usage.md explains the bridge; without the auth module the proxy route is the plain one', () => {
+      const usage = read(dir, '.memory/docs/guides/usage.md')
+      expect(usage).toContain('Its `/api` proxy carries the\n**auth bridge** (`ui/server/kit/auth-bridge.ts`)')
+      expect(usage).toContain('AUTH_BRIDGE_TRUSTED_PROXIES   UI ')
+      expect(usage).not.toMatch(/@kit:/)
+      const plain = scaffold(['--kind', 'fullstack'])
+      expect(read(plain.dir, 'ui/server/routes/api/[...path].ts')).not.toContain('auth-bridge')
+      expect(plain.r.json.locked).not.toContain('ui/server/kit/auth-bridge.ts')
+      // a UI-only project has no /api proxy of its own, so no bridge
+      expect(scaffold(['--kind', 'nuxt-app', '--with', 'auth']).r.json.locked.filter((f: string) => f.includes('auth-bridge'))).toEqual([])
+    })
+  })
+
   it('--context authentikUrl lands in the docs and survives check', () => {
     const base = tmp('auth-ctx')
     const dir = join(base, 'app')
     const ctx = join(base, 'ctx.json')
     writeFileSync(ctx, JSON.stringify({ authentikUrl: 'https://sso.example.org' }))
     expect(cli(['new', 'demo-app', '--kind', 'api', '--with', 'auth', '--context', ctx, '--dir', dir, '--json']).status).toBe(0)
-    expect(read(dir, '.memory/docs/guides/usage.md')).toContain('Identity provider (https://sso.example.org)')
+    expect(read(dir, '.memory/docs/guides/usage.md')).toContain('**4. Identity provider** (https://sso.example.org)')
     expect(JSON.parse(read(dir, '.scaffold.json')).answers.authentikUrl).toBe('https://sso.example.org')
     expect(cli(['check', dir, '--json']).json.clean).toBe(true)
     // not given = not recorded, so older projects keep the same manifest
