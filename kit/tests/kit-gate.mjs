@@ -173,9 +173,9 @@ async function gateRuntimeOnMysql(combo) {
   dirs.add(tmp)
   const log = join(tmp, 'gate.log')
   writeFileSync(log, `kit gate — ${combo.id}\n`)
-  const step = 'vitest kit/tests/runtime-db + runtime-testing on MySQL'
+  const step = 'vitest kit/tests/runtime-db + runtime-testing + runtime-auth on MySQL'
   try {
-    const { out } = await run(log, 'npx', ['vitest', 'run', 'kit/tests/runtime-db.spec.ts', 'kit/tests/runtime-testing.spec.ts'], { cwd: REPO, timeout: 300_000, extraEnv: { TEST_MYSQL_URL: mysqlUrl } })
+    const { out } = await run(log, 'npx', ['vitest', 'run', 'kit/tests/runtime-db.spec.ts', 'kit/tests/runtime-testing.spec.ts', 'kit/tests/runtime-auth.spec.ts'], { cwd: REPO, timeout: 300_000, extraEnv: { TEST_MYSQL_URL: mysqlUrl } })
     if (/SKIPPED|skipped/.test(out)) throw new StepError('some MySQL cases were skipped although TEST_MYSQL_URL was set')
     return { combo, ok: true, seconds: Math.round((Date.now() - started) / 1000), steps: 1 }
   } catch (e) {
@@ -274,7 +274,7 @@ async function gateCombo(combo, index) {
       })
       if (combo.e2e && !flags['no-e2e']) {
         begin('ui: playwright e2e')
-        await run(log, 'npx', ['playwright', 'test'], { cwd: uiDir, timeout: 300_000, extraEnv: { E2E_PORT: String(port + 2) } })
+        await run(log, 'npx', ['playwright', 'test'], { cwd: uiDir, timeout: 300_000, extraEnv: { E2E_PORT: String(port + 2), WRANGLER_SEND_METRICS: 'false' } })
       }
     }
 
@@ -359,7 +359,7 @@ async function gateCombo(combo, index) {
 
     // helper object for combo.checks (module tasks): run commands in the project, start servers, call the generator
     const t = {
-      combo, dir, apiDir, uiDir, port, plan, begin, tmp, dbEnv, onMysql: !!onMysql,
+      combo, dir, apiDir, uiDir, port, plan, begin, tmp, dbEnv, onMysql: !!onMysql, noE2e: !!flags['no-e2e'],
       run: (cmd, cmdArgs, opts = {}) => run(log, cmd, cmdArgs, { cwd: dir, ...opts }),
       scaffold: (cmdArgs, opts) => scaffold(log, cmdArgs, opts),
       withServer: (cmd, cmdArgs, opts, probe) => withServer(log, cmd, cmdArgs, { cwd: dir, ...opts }, probe),
