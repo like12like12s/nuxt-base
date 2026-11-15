@@ -1,0 +1,53 @@
+{
+  "name": "nuxt-app",
+  "description": "Nuxt 4 SPA extending the nuxt-base layer by git tag: tokens + components from the layer, DESIGN.md, vitest (nuxt env), playwright e2e skeleton",
+  "parts": [{ "type": "ui", "dir": "" }],
+  "contributes": {
+    "project": {
+      "files": [{ "from": "project/DESIGN.md", "to": "DESIGN.md" }]
+    },
+    "ui": {
+      "package": {
+        "type": "module",
+        "engines": { "node": ">=24" },
+        "scripts": {
+          "dev": "nuxt dev",
+          "build": "nuxt build",
+          "serve": "node --env-file-if-exists=.env .output/server/index.mjs",
+          "postinstall": "nuxt prepare",
+          "typecheck": "nuxt typecheck",
+          "test": "vitest run",
+          "test:e2e": "npm run build && playwright test",
+          "gate": "npm run typecheck && npm run test"
+        },
+        "dependencies": {
+          "@tailwindcss/vite": "^4.3.5",
+          "lucide-vue-next": "^1.0.0",
+          "nuxt": "^4.6.4",
+          "tailwindcss": "^4.3.5",
+          "vue": "^3.5.45",
+          "vue-router": "^5.5.1"
+        },
+        "devDependencies": {
+          "@nuxt/test-utils": "^4.4.0",
+          "@playwright/test": "^1.65.1",
+          "@vue/test-utils": "^2.6.0",
+          "happy-dom": "^21.0.4",
+          "typescript": "^5.9.0",
+          "vitest": "^5.1.0",
+          "vue-tsc": "^3.2.0"
+        }
+      },
+      "env": [
+        { "key": "PORT", "required": false, "secret": false, "example": "{{kit.port}}", "description": "Port of the built server (npm run serve); dev uses devServer.port in nuxt.config.ts" },
+        { "key": "NUXT_PUBLIC_API_BASE", "required": false, "secret": false, "example": "", "description": "Base URL of the backend the browser calls; empty = same origin" }
+      ],
+      "files": [{ "from": "files", "to": "" }],
+      "gitignore": ["node_modules/", ".nuxt/", ".output/", "dist/", ".env", "*.log", "test-results/", "playwright-report/"],
+      "usage": "usage.md"
+    }
+  },
+  "generators": {
+    "page": { "module": "generators/page.mjs", "part": "ui" }
+  }
+}

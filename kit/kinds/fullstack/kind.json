@@ -1,0 +1,29 @@
+{
+  "name": "fullstack",
+  "description": "One repo with api/ (kind api) + ui/ (kind nuxt-app, /api/** proxied to the API); the root gate runs both",
+  "parts": [
+    { "type": "api", "dir": "api", "kind": "api" },
+    { "type": "ui", "dir": "ui", "kind": "nuxt-app" }
+  ],
+  "contributes": {
+    "project": {
+      "package": {
+        "scripts": {
+          "postinstall": "npm install --prefix api && npm install --prefix ui",
+          "dev:api": "npm run dev --prefix api",
+          "dev:ui": "npm run dev --prefix ui",
+          "build": "npm run build --prefix api && npm run build --prefix ui",
+          "gate": "npm run gate --prefix api && npm run gate --prefix ui"
+        }
+      },
+      "files": [{ "from": "../nuxt-app/project/DESIGN.md", "to": "DESIGN.md" }],
+      "usage": "usage.md"
+    },
+    "ui": {
+      "env": [
+        { "key": "API_URL", "required": false, "secret": false, "example": "http://127.0.0.1:{{kit.apiPort}}", "description": "Where the UI server proxies /api/** to (server side only)" }
+      ],
+      "files": [{ "from": "files-ui", "to": "" }]
+    }
+  }
+}
