@@ -1,7 +1,7 @@
 {
   "name": "base",
   "status": "ready",
-  "description": "Always included: README, brief, .memory docs, .scaffold.json, gate + gate:ci (gitleaks, npm audit)",
+  "description": "Always included: README, .memory docs (brief, context, usage, changelog), .scaffold.json, gate + gate:ci (gitleaks, npm audit)",
   "kinds": ["nuxt-app", "api", "fullstack"],
   "requires": [],
   "contributes": {

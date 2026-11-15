@@ -49,6 +49,9 @@ export function cmdNew(kit, opts) {
       ...(opts.dryRun ? { dryRun: true } : {}),
       dir,
       name: plan.name,
+      // What the project calls itself — the wrapper registers these, so a registry never shows the bare name as a title.
+      title: plan.manifest.answers.title,
+      description: plan.manifest.answers.description,
       kind: plan.kind,
       modules: plan.modules,
       db: plan.db,

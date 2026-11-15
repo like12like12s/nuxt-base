@@ -13,7 +13,7 @@ npm run gate:ci     # gate + gitleaks + npm audit --audit-level=high
 {{kit.services}}
 
 - How to run, test and deploy: [.memory/docs/guides/usage.md](.memory/docs/guides/usage.md)
-- Why this project exists: [brief.md](brief.md) · current state: [.memory/docs/context/context.md](.memory/docs/context/context.md)
+- Why this project exists: [.memory/docs/brief/brief.md](.memory/docs/brief/brief.md) · current state: [.memory/docs/context/context.md](.memory/docs/context/context.md)
 - Kit-owned files are listed in `.scaffold.json` (`locked`) — do not edit them; `scaffold check` reports drift and
   `scaffold update` re-copies them and bumps the layer tag.
 

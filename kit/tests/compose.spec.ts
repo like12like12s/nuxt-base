@@ -27,7 +27,7 @@ describe('new — composition', () => {
     const { dir, r } = scaffold(['--kind', kind, ...(deploy ? ['--deploy', deploy] : [])])
     expect(r.status).toBe(0)
     expect(r.json.files[0]).toBe('.gitignore')
-    for (const f of ['.gitignore', 'README.md', 'brief.md', '.scaffold.json', 'package.json', 'scripts/gate-ci.mjs',
+    for (const f of ['.gitignore', 'README.md', '.memory/docs/brief/brief.md', '.scaffold.json', 'package.json', 'scripts/gate-ci.mjs',
       '.memory/docs/context/context.md', '.memory/docs/guides/usage.md', '.memory/docs/changelog/changelog.md']) {
       expect(r.json.files, f).toContain(f)
       expect(existsSync(join(dir, f)), f).toBe(true)
@@ -47,7 +47,7 @@ describe('new — composition', () => {
 
   it('--json for `new` has exactly the contract keys', () => {
     const { r } = scaffold(['--kind', 'api', '--port', '3920'])
-    expect(Object.keys(r.json)).toEqual(['ok', 'dir', 'name', 'kind', 'modules', 'db', 'deploy', 'kitVersion', 'files', 'locked', 'services', 'env', 'backup', 'next'])
+    expect(Object.keys(r.json)).toEqual(['ok', 'dir', 'name', 'title', 'description', 'kind', 'modules', 'db', 'deploy', 'kitVersion', 'files', 'locked', 'services', 'env', 'backup', 'next'])
     expect(r.json).toMatchObject({ ok: true, name: 'demo-app', kind: 'api', modules: ['base'], db: null, deploy: null, kitVersion: rootPkg.version, backup: [] })
     expect(r.json.services).toEqual([{ id: 'demo-app-api', name: 'API', type: 'api', port: 3920, healthPath: '/health/live' }])
     expect(r.json.env).toContainEqual({ key: 'PORT', required: true, secret: false })
@@ -253,6 +253,42 @@ describe('new — hostile --context values', () => {
       expect(r.status, JSON.stringify(context)).toBe(0)
       expect(JSON.parse(read(dir, '.scaffold.json')).answers).toMatchObject({ title: 'Demo App', description: 'Demo App — scaffolded with the nuxt-base kit' })
       expect(read(dir, 'README.md')).toMatch(/^# Demo App\n\nDemo App — scaffolded with the nuxt-base kit\n/)
+    }
+  })
+
+  // Finding #10 of the first real use: the wrapper passed the name as the title and no description — the registry
+  // showed `kit-ref`, context.md had an empty bullet, and the brief existed twice.
+  it('a title that is blank or only repeats the name is derived from the name; `new --json` reports what was used', () => {
+    for (const context of [{ title: 'demo-app' }, { title: '   ' }, { title: ' demo-app ' }, {}]) {
+      const { dir, r } = withContext(context, ['--kind', 'nuxt-app'])
+      expect(r.json, JSON.stringify(context)).toMatchObject({ title: 'Demo App', description: 'Demo App — scaffolded with the nuxt-base kit' })
+      expect(read(dir, 'app/app.config.ts')).toContain('name: "Demo App"')
+    }
+    const { r } = withContext({ title: '  Link Shelf ', description: ' Links worth keeping ' }, ['--kind', 'api'])
+    expect(r.json).toMatchObject({ title: 'Link Shelf', description: 'Links worth keeping' })
+  })
+
+  it('no generated document has an empty bullet or an empty heading, whatever title / description was passed', () => {
+    for (const context of [{}, { title: '', description: '' }, { title: ' ', description: '   ' }, { title: 'demo-app', description: null }]) {
+      for (const args of [['--kind', 'nuxt-app'], ['--kind', 'fullstack', '--with', 'db,auth,api,trace,og,security,jobs,notify', '--deploy', 'container'], ['--kind', 'api', '--deploy', 'pm2']]) {
+        const { dir, r } = withContext(context, args)
+        const docs = r.json.files.filter((path: string) => path.endsWith('.md'))
+        expect(docs.length).toBeGreaterThan(4)
+        for (const path of docs) {
+          const empty = read(dir, path).split('\n').filter((line) => /^\s*(?:[-*+]|#{1,6}|\d+\.)\s*$/.test(line))
+          expect(empty, `${path} with ${JSON.stringify(context)}`).toEqual([])
+        }
+      }
+    }
+  })
+
+  it('the brief lives in one place — .memory/docs/brief/brief.md — and the README links to it', () => {
+    for (const kind of KINDS) {
+      const { dir, r } = scaffold(['--kind', kind])
+      expect(r.json.files.filter((path: string) => /(^|\/)brief\.md$/.test(path)), kind).toEqual(['.memory/docs/brief/brief.md'])
+      expect(read(dir, '.memory/docs/brief/brief.md')).toMatch(/^---\nname: demo-app-brief\ndescription: .+\n---\n# Demo App — Brief\n/)
+      expect(read(dir, 'README.md')).toContain('[.memory/docs/brief/brief.md](.memory/docs/brief/brief.md)')
+      expect(read(dir, 'README.md')).not.toMatch(/\]\(brief\.md\)/)
     }
   })
 

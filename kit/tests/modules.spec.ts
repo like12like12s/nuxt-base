@@ -111,7 +111,7 @@ describe('kind api --with api,db', () => {
 
   it('--json reports what a backup job must cover, and registers nothing itself', () => {
     expect(r.json.backup).toEqual([{ id: 'demo-app-db', service: 'demo-app-api', engine: 'sqlite', envKey: 'DATABASE_URL', path: 'data/demo-app.db' }])
-    expect(Object.keys(r.json)).toEqual(['ok', 'dir', 'name', 'kind', 'modules', 'db', 'deploy', 'kitVersion', 'files', 'locked', 'services', 'env', 'backup', 'next'])
+    expect(Object.keys(r.json)).toEqual(['ok', 'dir', 'name', 'title', 'description', 'kind', 'modules', 'db', 'deploy', 'kitVersion', 'files', 'locked', 'services', 'env', 'backup', 'next'])
     expect(r.json.next.join('\n')).toMatch(/db:migrate -- up/)
   })
 

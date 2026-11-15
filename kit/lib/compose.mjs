@@ -93,6 +93,13 @@ function validateContext(input, lenient = false) {
 // would leave the port range. E2E_PORT still overrides it.
 export const e2ePort = (uiPort) => (uiPort + 10000 <= 65535 ? uiPort + 10000 : uiPort - 10000)
 
+// A title / description counts as given only when it says something: empty or blank is "not given" (a wrapper passes
+// "" when its own flag was left out), and so is a title that merely repeats the kebab-case name — the readable form
+// derived from the name (`kit-ref` -> `Kit Ref`) is the better default for a registry, a page title and the docs.
+const given = (value, name) => {
+  const text = typeof value === 'string' ? value.trim() : ''
+  return text && text !== name ? text : ''
+}
 const titleCase = (name) => name.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ')
 const csv = (list) => (list.length ? list.join(', ') : 'none')
 
@@ -179,9 +186,8 @@ export function resolveSelection(kit, input) {
     // Everything needed to re-compose this exact project later (check / update read it back from .scaffold.json).
     answers: {
       name,
-      // Empty counts as not given (a wrapper may pass "" when its own flag was left out).
-      title: context.title || titleCase(name),
-      description: context.description || `${titleCase(name)} — scaffolded with the nuxt-base kit`,
+      title: given(context.title, name) || titleCase(name),
+      description: given(context.description) || `${titleCase(name)} — scaffolded with the nuxt-base kit`,
       port: ports.ui,
       apiPort: ports.api,
       deploy: deployCtx,

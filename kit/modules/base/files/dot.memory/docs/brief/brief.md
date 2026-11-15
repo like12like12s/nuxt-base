@@ -1,3 +1,7 @@
+---
+name: {{kit.name}}-brief
+description: Why {{kit.name}} exists — problem, goal, scope
+---
 # {{kit.title}} — Brief
 
 > Fill this in before writing features. One page; the reader is the next person (or agent) who opens the repo.

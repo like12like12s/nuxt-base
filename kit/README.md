@@ -37,7 +37,7 @@ With `--json` the result is one JSON document on stdout. Errors: `{ "ok": false,
 the exit code (without `--json`: the message on stderr).
 
 ```
-new     { ok, dir, name, kind, modules[], db, deploy, kitVersion, files[], locked[],
+new     { ok, dir, name, title, description, kind, modules[], db, deploy, kitVersion, files[], locked[],
           services[{ id, name, type: "web"|"api", port, healthPath }], env[{ key, required, secret }],
           backup[{ id, service, engine: "sqlite"|"mysql", envKey, path? | database? }], next[] }
           (+ "dryRun": true with --dry-run — same plan, nothing written)
@@ -53,6 +53,10 @@ list    { ok, kitVersion, layerRef, kinds[{ name, description, parts[{ type, dir
 
 - `name`: lowercase kebab-case. `services[].id` is `<name>-web` / `<name>-api`; the wrapper adds the environment
   when it registers them.
+- `title` / `description`: what the project calls itself, exactly as rendered into its files — register these, not
+  the name. Without a `title` in `--context` (absent, blank, or just the name again) it is derived from the name
+  (`kit-ref` -> `Kit Ref`); without a `description`, `<Title> — scaffolded with the nuxt-base kit`. No generated
+  document has an empty bullet or heading, whatever was passed.
 - Ports: one-part kinds use `--port` (default 3000). `fullstack`: `--port N` alone = API on N, UI on N+1 (port
   pairing); with `--api-port`, `--port` is the UI port.
 - `backup` is what a backup job has to cover (empty without the `db` module): `path` = the SQLite file relative to
@@ -244,7 +248,8 @@ fullstack   api/ + ui/ in one repo, each with its own package.json and lockfile;
             the API (API_URL); the root package.json wires install / gate / build to both
 ```
 
-Every kind gets `.gitignore` (first), `README.md`, `brief.md`, `.memory/docs/{context,guides,changelog}`,
+Every kind gets `.gitignore` (first), `README.md`, `.memory/docs/{brief,context,guides,changelog}` (the brief lives
+in ONE place, `.memory/docs/brief/brief.md` — the README links to it; there is no root `brief.md`),
 `.env.example` per part, `.scaffold.json`, and `npm run gate` / `gate:ci` at the root. The README and `next[]` say
 that the repository must stay private: the answers, `docker/` and the env examples record deployment details. `gate` is typecheck → lint
 (`oxlint --deny-warnings`, build output ignored through `.oxlintrc.json`) → unit tests. `gate:ci` (locked
