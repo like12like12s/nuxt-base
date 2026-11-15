@@ -1,7 +1,7 @@
 // Env schema of {{kit.name}}. Validated once at boot (src/index.ts): a missing or invalid key stops the process and
 // names the key. A key without `.default()` / `.optional()` is required. Keep .env.example in sync.
 import { z } from 'zod'
-import { loadEnv, redactEnv } from './kit/env.js'
+import { loadEnv, redactEnv } from './kit/api/env.js'
 
 const shape = {
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),

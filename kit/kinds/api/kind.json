@@ -33,11 +33,15 @@
         { "key": "NODE_ENV", "required": false, "secret": false, "example": "development", "description": "development | test | production" },
         { "key": "LOG_LEVEL", "required": false, "secret": false, "example": "info", "description": "debug | info | warn | error" }
       ],
-      "files": [{ "from": "files", "to": "" }],
+      "files": [
+        { "from": "files", "to": "" },
+        { "from": "files-plain", "to": "", "when": { "without": ["api"] } }
+      ],
       "locked": [
-        { "from": "runtime/api/env.ts", "to": "src/kit/env.ts" },
-        { "from": "runtime/api/log.ts", "to": "src/kit/log.ts" },
-        { "from": "runtime/api/shutdown.ts", "to": "src/kit/shutdown.ts" }
+        { "from": "runtime/api/context.ts", "to": "src/kit/api/context.ts" },
+        { "from": "runtime/api/env.ts", "to": "src/kit/api/env.ts" },
+        { "from": "runtime/api/log.ts", "to": "src/kit/api/log.ts" },
+        { "from": "runtime/api/shutdown.ts", "to": "src/kit/api/shutdown.ts" }
       ],
       "gitignore": ["node_modules/", "dist/", ".env", "*.log", "*.tsbuildinfo", "data/", "*.db"],
       "usage": "usage.md"

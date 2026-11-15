@@ -59,7 +59,7 @@ describe('exit codes', () => {
   it.each([
     ['unknown kind', ['--kind', 'django'], 'unknown_kind'],
     ['unknown module', ['--kind', 'api', '--with', 'nope'], 'unknown_module'],
-    ['planned module', ['--kind', 'api', '--with', 'db'], 'planned_module'],
+    ['planned module', ['--kind', 'api', '--with', 'auth'], 'planned_module'],
     ['unknown preset', ['--kind', 'api', '--deploy', 'heroku'], 'unknown_preset'],
     ['cf-pages on api', ['--kind', 'api', '--deploy', 'cf-pages'], 'incompatible_preset'],
     ['cf-pages on fullstack', ['--kind', 'fullstack', '--deploy', 'cf-pages'], 'incompatible_preset'],
@@ -74,7 +74,7 @@ describe('exit codes', () => {
 
   it('4 — every planned module is refused with a clear message', () => {
     const planned = cli(['list', '--json']).json.modules.filter((m: any) => m.status === 'planned')
-    expect(planned.map((m: any) => m.name)).toEqual(['api', 'auth', 'db', 'jobs', 'notify', 'og', 'security', 'testkit', 'trace'])
+    expect(planned.map((m: any) => m.name)).toEqual(['auth', 'jobs', 'notify', 'og', 'security', 'trace'])
     for (const m of planned) {
       const r = cli(['new', 'demo-app', '--kind', m.kinds[0], '--with', m.name, '--dir', target(), '--json'])
       expect(r.status, m.name).toBe(4)
@@ -90,7 +90,7 @@ describe('exit codes', () => {
     }
     mod('ui-only', { kinds: ['nuxt-app'] })
     mod('needs-ci', { kinds: ['api'], requires: ['ci-github'] })
-    mod('needs-planned', { kinds: ['api'], requires: ['db'] })
+    mod('needs-planned', { kinds: ['api'], requires: ['auth'] })
     const bad = cli(['new', 'demo-app', '--kind', 'api', '--with', 'ui-only', '--dir', target(), '--json'], { kit })
     expect(bad.status).toBe(4)
     expect(bad.json.code).toBe('incompatible_module')

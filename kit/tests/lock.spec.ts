@@ -24,14 +24,14 @@ describe('check', () => {
 
   it('an edited locked file is drift (exit 1); the default dir is the cwd', () => {
     const dir = project(['--kind', 'api'])
-    appendFileSync(join(dir, 'src/kit/env.ts'), '\n// local tweak\n')
+    appendFileSync(join(dir, 'src/kit/api/env.ts'), '\n// local tweak\n')
     const r = cli(['check', '--json'], { cwd: dir })
     expect(r.status).toBe(1)
     expect(r.json.clean).toBe(false)
-    expect(r.json.drift).toEqual([{ path: 'src/kit/env.ts', reason: 'modified' }])
+    expect(r.json.drift).toEqual([{ path: 'src/kit/api/env.ts', reason: 'modified' }])
     const plain = cli(['check', dir])
     expect(plain.status).toBe(1)
-    expect(plain.stdout).toContain('modified  src/kit/env.ts')
+    expect(plain.stdout).toContain('modified  src/kit/api/env.ts')
   })
 
   it('a missing locked file is drift (exit 1)', () => {
@@ -55,16 +55,16 @@ describe('check', () => {
     appendFileSync(join(kit, 'runtime/api/log.ts'), '\n// kit v2\n')
     const kindFile = join(kit, 'kinds/api/kind.json')
     const kind = JSON.parse(read(kit, 'kinds/api/kind.json'))
-    kind.contributes.api.locked = kind.contributes.api.locked.filter((l: any) => l.to !== 'src/kit/shutdown.ts')
+    kind.contributes.api.locked = kind.contributes.api.locked.filter((l: any) => l.to !== 'src/kit/api/shutdown.ts')
     writeFileSync(join(kit, 'runtime/api/extra.ts'), '// DO NOT EDIT\nexport const extra = 1\n')
-    kind.contributes.api.locked.push({ from: 'runtime/api/extra.ts', to: 'src/kit/extra.ts' })
+    kind.contributes.api.locked.push({ from: 'runtime/api/extra.ts', to: 'src/kit/api/extra.ts' })
     writeFileSync(kindFile, JSON.stringify(kind))
     const r = cli(['check', dir, '--json'], { kit })
     expect(r.status).toBe(1)
     expect(r.json.drift).toEqual([
-      { path: 'src/kit/extra.ts', reason: 'new-in-kit' },
-      { path: 'src/kit/log.ts', reason: 'outdated' },
-      { path: 'src/kit/shutdown.ts', reason: 'removed-from-kit' },
+      { path: 'src/kit/api/extra.ts', reason: 'new-in-kit' },
+      { path: 'src/kit/api/log.ts', reason: 'outdated' },
+      { path: 'src/kit/api/shutdown.ts', reason: 'removed-from-kit' },
     ])
   })
 
@@ -93,7 +93,7 @@ describe('update', () => {
   it('restores edited and missing locked files and leaves app-owned files alone', () => {
     const dir = project(['--kind', 'fullstack', '--deploy', 'container'])
     const before = snapshot(dir)
-    appendFileSync(join(dir, 'api/src/kit/env.ts'), '\n// local tweak\n')
+    appendFileSync(join(dir, 'api/src/kit/api/env.ts'), '\n// local tweak\n')
     rmSync(join(dir, 'ui/Dockerfile'))
     appendFileSync(join(dir, 'api/src/app.ts'), '\n// my route\n')
     mkdirSync(join(dir, 'api/src/routes'))
@@ -102,10 +102,10 @@ describe('update', () => {
 
     const r = cli(['update', dir, '--json'])
     expect(r.status).toBe(0)
-    expect(r.json.updated).toEqual(['api/src/kit/env.ts', 'ui/Dockerfile'])
+    expect(r.json.updated).toEqual(['api/src/kit/api/env.ts', 'ui/Dockerfile'])
     expect(cli(['check', dir, '--json']).status).toBe(0)
     const after = snapshot(dir)
-    expect(after['api/src/kit/env.ts']).toBe(before['api/src/kit/env.ts'])
+    expect(after['api/src/kit/api/env.ts']).toBe(before['api/src/kit/api/env.ts'])
     expect(after['ui/Dockerfile']).toBe(before['ui/Dockerfile'])
     expect(read(dir, 'api/src/app.ts')).toContain('// my route')
     expect(after['api/src/routes/mine.ts']).toBeTruthy()
@@ -131,18 +131,18 @@ describe('update', () => {
 
     const r = cli(['update', dir, '--json'], { kit })
     expect(r.status).toBe(0)
-    expect(r.json.updated).toEqual(['api/src/kit/log.ts'])
+    expect(r.json.updated).toEqual(['api/src/kit/api/log.ts'])
     expect(r.json.kit).toEqual({ from: '1.0.0', to: '1.2.0' })
     expect(r.json.layer).toEqual({ from: 'github:like12like12s/nuxt-base#v1.0.0', to: 'github:like12like12s/nuxt-base#v1.2.0', file: 'ui/nuxt.config.ts' })
     expect(read(dir, 'ui/nuxt.config.ts')).toContain(`extends: ['github:like12like12s/nuxt-base#v1.2.0']`)
-    expect(read(dir, 'api/src/kit/log.ts')).toContain('// kit 1.2')
+    expect(read(dir, 'api/src/kit/api/log.ts')).toContain('// kit 1.2')
     const manifest = JSON.parse(read(dir, '.scaffold.json'))
     expect(manifest).toMatchObject({ kit: '1.2.0', layerRef: 'github:like12like12s/nuxt-base#v1.2.0' })
     expect(cli(['check', dir, '--json'], { kit }).status).toBe(0)
 
     const after = snapshot(dir)
     const changed = Object.keys(after).filter((p) => after[p] !== before[p]).sort()
-    expect(changed).toEqual(['.scaffold.json', 'api/src/kit/log.ts', 'ui/nuxt.config.ts'])
+    expect(changed).toEqual(['.scaffold.json', 'api/src/kit/api/log.ts', 'ui/nuxt.config.ts'])
     expect(Object.keys(after).sort()).toEqual(Object.keys(before).sort())
   })
 
@@ -150,12 +150,12 @@ describe('update', () => {
     const kit = cloneKit('1.0.0')
     const dir = project(['--kind', 'api'], kit)
     const kind = JSON.parse(read(kit, 'kinds/api/kind.json'))
-    kind.contributes.api.locked = kind.contributes.api.locked.filter((l: any) => l.to !== 'src/kit/shutdown.ts')
+    kind.contributes.api.locked = kind.contributes.api.locked.filter((l: any) => l.to !== 'src/kit/api/shutdown.ts')
     writeFileSync(join(kit, 'kinds/api/kind.json'), JSON.stringify(kind))
     const r = cli(['update', dir, '--json'], { kit })
-    expect(r.json.orphaned).toEqual(['src/kit/shutdown.ts'])
-    expect(read(dir, 'src/kit/shutdown.ts')).toContain('gracefulShutdown')
-    expect(Object.keys(JSON.parse(read(dir, '.scaffold.json')).locked)).not.toContain('src/kit/shutdown.ts')
+    expect(r.json.orphaned).toEqual(['src/kit/api/shutdown.ts'])
+    expect(read(dir, 'src/kit/api/shutdown.ts')).toContain('gracefulShutdown')
+    expect(Object.keys(JSON.parse(read(dir, '.scaffold.json')).locked)).not.toContain('src/kit/api/shutdown.ts')
     expect(cli(['check', dir, '--json'], { kit }).status).toBe(0)
   })
 

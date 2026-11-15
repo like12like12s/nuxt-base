@@ -45,6 +45,7 @@ export function cmdNew(kit, opts) {
       locked: Object.keys(plan.locked),
       services: plan.services,
       env: plan.env,
+      backup: plan.backup,
       next: plan.next,
     },
   }

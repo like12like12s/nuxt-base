@@ -42,7 +42,15 @@ function resolvePorts(kind, port, apiPort) {
   return { api: only, ui: only }
 }
 
-const matches = (when, ctx) => !when || !when.kind || when.kind.includes(ctx.kind)
+// `when` on a file / locked / symlink / backup entry: every key present must hold.
+//   kind: [..] the project's kind is one of these · with: [..] all these modules are in · without: [..] none of them is
+//   db: [..] the --db value is one of these
+const matches = (when, ctx) =>
+  !when ||
+  ((!when.kind || when.kind.includes(ctx.kind)) &&
+    (!when.with || when.with.every((m) => ctx.modules.includes(m))) &&
+    (!when.without || !when.without.some((m) => ctx.modules.includes(m))) &&
+    (!when.db || when.db.includes(ctx.db)))
 
 // What `new` was asked for -> validated, normalised selection. Throws KitError with the contract's exit codes.
 export function resolveSelection(kit, input) {
@@ -88,6 +96,8 @@ export function resolveSelection(kit, input) {
       port: ports.ui,
       apiPort: ports.api,
       deploy: deployCtx,
+      // Only recorded when given, so projects without it keep the same .scaffold.json.
+      ...(context.mysqlHost ? { mysqlHost: String(context.mysqlHost) } : {}),
     },
   }
 }
@@ -103,7 +113,7 @@ export function compose(kit, input) {
   // part-level contributions land in the same package.json.
   const accs = new Map()
   const acc = (dir) => {
-    if (!accs.has(dir)) accs.set(dir, { dir, pkg: {}, env: new Map(), files: [], locked: [], symlinks: [], nuxtConfig: [] })
+    if (!accs.has(dir)) accs.set(dir, { dir, pkg: {}, env: new Map(), files: [], locked: [], symlinks: [], nuxtConfig: [], backup: [] })
     return accs.get(dir)
   }
   const gitignore = []
@@ -117,7 +127,7 @@ export function compose(kit, input) {
   for (const name of sel.modules) applications.push({ unit: kit.modules.get(name) })
   if (preset) applications.push({ unit: preset })
 
-  const when = { kind: kind.name }
+  const when = { kind: kind.name, modules: sel.modules, db: sel.db }
   for (const { unit, only } of applications) {
     if (!unit) throw new Error(`kit is inconsistent: a unit referenced by kind "${kind.name}" is missing`)
     for (const [target, c] of Object.entries(unit.contributes ?? {})) {
@@ -127,6 +137,7 @@ export function compose(kit, input) {
       const a = acc(dir)
       mergePackage(a.pkg, c.package)
       for (const e of c.env ?? []) a.env.set(e.key, { ...a.env.get(e.key), ...e })
+      for (const b of c.backup ?? []) if (matches(b.when, when)) a.backup.push(b)
       for (const f of c.files ?? []) if (matches(f.when, when)) a.files.push({ ...f, unit })
       for (const f of c.locked ?? []) if (matches(f.when, when)) a.locked.push(f)
       for (const s of c.symlinks ?? []) if (matches(s.when, when)) a.symlinks.push(s)
@@ -164,6 +175,13 @@ export function compose(kit, input) {
     deployHost: deploy.host,
     deployDomain: deploy.domain,
     deployUser: deploy.user,
+    mysqlHost: sel.answers.mysqlHost ?? 'db.example.com',
+    dbName: sel.name.replaceAll('-', '_'),
+    // Placeholders, never a credential: the real URL lives in .env only.
+    databaseUrlExample:
+      sel.db === 'mysql'
+        ? `mysql://<user>:<password>@${sel.answers.mysqlHost ?? 'db.example.com'}:3306/${sel.name.replaceAll('-', '_')}`
+        : `sqlite:./data/${sel.name}.db`,
     services: services.map((s) => `- ${s.name} (\`${s.id}\`, ${s.type}) — port ${s.port}, health \`${s.healthPath}\``).join('\n'),
     nuxtConfig: '',
     usageSections: '',
@@ -229,6 +247,18 @@ export function compose(kit, input) {
     env.push({ key: e.key, required: !!e.required, secret: !!e.secret })
   }
 
+  // What a backup job has to cover — the wrapper registers it, the generator registers nothing.
+  const backup = []
+  for (const a of [...accs.values()].sort((x, y) => (x.dir < y.dir ? -1 : 1))) {
+    const vars = varsFor(a)
+    for (const { when: _when, path, ...rest } of a.backup) {
+      const entry = { id: `${sel.name}-db`, service: `${sel.name}-api` }
+      for (const [key, value] of Object.entries(rest)) entry[key] = render(String(value), vars, 'backup')
+      if (path) entry.path = posix.join(a.dir, render(path, vars, 'backup'))
+      backup.push(entry)
+    }
+  }
+
   const locked = {}
   for (const path of [...files.keys()].sort()) if (files.get(path).locked) locked[path] = sha256(files.get(path).content)
 
@@ -261,6 +291,7 @@ export function compose(kit, input) {
     locked,
     services,
     env,
+    backup,
     next: ['npm install', 'npm run gate', 'git init && git add -A && git commit -m "scaffold"', ...next.map((n) => render(n, baseVars, 'next'))],
   }
 }
@@ -278,6 +309,6 @@ export function composeFromManifest(kit, manifest) {
     deploy: manifest.deploy ?? undefined,
     port: a.port,
     apiPort: both ? a.apiPort : undefined,
-    context: { title: a.title, description: a.description, layerRef: manifest.layerRef ?? undefined, deploy: a.deploy },
+    context: { title: a.title, description: a.description, layerRef: manifest.layerRef ?? undefined, deploy: a.deploy, mysqlHost: a.mysqlHost },
   })
 }

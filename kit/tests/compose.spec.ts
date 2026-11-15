@@ -47,8 +47,8 @@ describe('new — composition', () => {
 
   it('--json for `new` has exactly the contract keys', () => {
     const { r } = scaffold(['--kind', 'api', '--port', '3920'])
-    expect(Object.keys(r.json)).toEqual(['ok', 'dir', 'name', 'kind', 'modules', 'db', 'deploy', 'kitVersion', 'files', 'locked', 'services', 'env', 'next'])
-    expect(r.json).toMatchObject({ ok: true, name: 'demo-app', kind: 'api', modules: ['base'], db: null, deploy: null, kitVersion: rootPkg.version })
+    expect(Object.keys(r.json)).toEqual(['ok', 'dir', 'name', 'kind', 'modules', 'db', 'deploy', 'kitVersion', 'files', 'locked', 'services', 'env', 'backup', 'next'])
+    expect(r.json).toMatchObject({ ok: true, name: 'demo-app', kind: 'api', modules: ['base'], db: null, deploy: null, kitVersion: rootPkg.version, backup: [] })
     expect(r.json.services).toEqual([{ id: 'demo-app-api', name: 'API', type: 'api', port: 3920, healthPath: '/health/live' }])
     expect(r.json.env).toContainEqual({ key: 'PORT', required: true, secret: false })
     expect(r.json.next.slice(0, 2)).toEqual(['npm install', 'npm run gate'])
@@ -60,7 +60,7 @@ describe('new — composition', () => {
     expect(Object.keys(m)).toEqual(['kit', 'kind', 'modules', 'db', 'deploy', 'layerRef', 'answers', 'locked'])
     expect(m).toMatchObject({ kit: rootPkg.version, kind: 'api', modules: ['base'], db: null, deploy: null, layerRef: null })
     expect(Object.keys(m.locked).sort()).toEqual([...r.json.locked].sort())
-    expect(Object.keys(m.locked)).toEqual(['scripts/gate-ci.mjs', 'src/kit/env.ts', 'src/kit/log.ts', 'src/kit/shutdown.ts'])
+    expect(Object.keys(m.locked)).toEqual(['scripts/gate-ci.mjs', 'src/kit/api/context.ts', 'src/kit/api/env.ts', 'src/kit/api/log.ts', 'src/kit/api/shutdown.ts'])
     const hashes = snapshot(dir)
     for (const [path, hash] of Object.entries(m.locked)) expect(hashes[path], path).toBe(hash)
     for (const path of Object.keys(m.locked)) expect(read(dir, path), path).toMatch(/DO NOT EDIT/)

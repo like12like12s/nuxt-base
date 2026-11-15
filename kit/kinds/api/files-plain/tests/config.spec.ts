@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { describeConfig, loadConfig } from '../src/config.js'
-import { EnvError, loadEnv, redactEnv } from '../src/kit/env.js'
+import { EnvError, loadEnv, redactEnv } from '../src/kit/api/env.js'
 
 describe('config', () => {
   it('loads with defaults when the required keys are set', () => {

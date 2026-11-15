@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
 import { loadConfig } from '../src/config.js'
-import { createLogger } from '../src/kit/log.js'
+import { createLogger } from '../src/kit/api/log.js'
 
 function setup() {
   const lines: Record<string, unknown>[] = []

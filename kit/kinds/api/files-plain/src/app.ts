@@ -1,7 +1,7 @@
 // The hono app of {{kit.name}}. Pure: no listening, no process.env — src/index.ts boots it, tests call app.request().
 import { Hono } from 'hono'
 import type { Config } from './config.js'
-import { createLogger, requestLogger, type Logger } from './kit/log.js'
+import { createLogger, requestLogger, type Logger } from './kit/api/log.js'
 
 export interface AppDeps {
   logger?: Logger

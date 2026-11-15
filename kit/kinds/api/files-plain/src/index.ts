@@ -2,9 +2,9 @@
 import { serve } from '@hono/node-server'
 import { createApp } from './app.js'
 import { describeConfig, loadConfig, type Config } from './config.js'
-import { EnvError } from './kit/env.js'
-import { createLogger } from './kit/log.js'
-import { gracefulShutdown } from './kit/shutdown.js'
+import { EnvError } from './kit/api/env.js'
+import { createLogger } from './kit/api/log.js'
+import { gracefulShutdown } from './kit/api/shutdown.js'
 
 let config: Config
 try {
