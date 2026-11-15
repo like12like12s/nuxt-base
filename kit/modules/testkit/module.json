@@ -1,11 +1,21 @@
 {
   "name": "testkit",
-  "status": "planned",
-  "description": "Deterministic factories, throwaway test DB, e2e helpers",
-  "kinds": [
-    "nuxt-app",
-    "api",
-    "fullstack"
-  ],
-  "requires": []
+  "status": "ready",
+  "description": "Test kit: deterministic factories (fixed seed, clock, ids), a throwaway test DB per test file (SQLite temp file / MySQL test_* schema), in-process app client, playwright helpers (error capture, API stub). Comes with api / db.",
+  "kinds": ["nuxt-app", "api", "fullstack"],
+  "requires": [],
+  "contributes": {
+    "api": {
+      "locked": [
+        { "from": "runtime/testing/client.ts", "to": "src/kit/testing/client.ts" },
+        { "from": "runtime/testing/factory.ts", "to": "src/kit/testing/factory.ts", "when": { "with": ["db"] } },
+        { "from": "runtime/testing/test-db.ts", "to": "src/kit/testing/test-db.ts", "when": { "with": ["db"] } }
+      ],
+      "usage": "usage.md"
+    },
+    "ui": {
+      "locked": [{ "from": "runtime/testing/e2e.ts", "to": "tests/kit/e2e.ts" }],
+      "usage": "usage-ui.md"
+    }
+  }
 }

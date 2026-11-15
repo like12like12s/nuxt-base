@@ -1,10 +1,50 @@
 {
   "name": "db",
-  "status": "planned",
-  "description": "Kysely + migrations + seed + base tables + pool timeout/retry + schema check + backup registration",
-  "kinds": [
-    "api",
-    "fullstack"
-  ],
-  "requires": []
+  "status": "ready",
+  "description": "Kysely data layer: one migration set for SQLite + MySQL (up/down), base tables users/audit/service_tokens, soft delete + audit helpers, timeouts + bounded retry, db:migrate / db:seed / db:check, backup before migrate",
+  "kinds": ["api", "fullstack"],
+  "requires": ["api", "testkit"],
+  "contributes": {
+    "api": {
+      "package": {
+        "scripts": {
+          "db:migrate": "tsx --env-file-if-exists=.env src/db/cli.ts migrate",
+          "db:seed": "tsx --env-file-if-exists=.env src/db/cli.ts seed",
+          "db:check": "tsx --env-file-if-exists=.env src/db/cli.ts check"
+        },
+        "dependencies": {
+          "kysely": "^0.29.9",
+          "mysql2": "^3.24.6"
+        }
+      },
+      "env": [
+        { "key": "DATABASE_URL", "required": true, "secret": true, "example": "{{kit.databaseUrlExample}}", "description": "Database: sqlite:<file> or mysql://<user>:<password>@<host>:3306/<database> — picks the engine at run time" },
+        { "key": "DB_CONNECT_TIMEOUT_MS", "required": false, "secret": false, "example": "5000", "description": "Connect / pool wait deadline (SQLite: lock wait)" },
+        { "key": "DB_QUERY_TIMEOUT_MS", "required": false, "secret": false, "example": "10000", "description": "Deadline of one statement (MySQL)" },
+        { "key": "DB_RETRIES", "required": false, "secret": false, "example": "2", "description": "Extra attempts on transient errors only (deadlock, lock wait, connection refused / lost)" },
+        { "key": "DB_POOL_MAX", "required": false, "secret": false, "example": "10", "description": "MySQL pool size" },
+        { "key": "DB_BACKUP_CMD", "required": false, "secret": false, "example": "", "description": "MySQL: dump command run before a migration; without it `db:migrate` refuses (see usage)" },
+        { "key": "DB_MIGRATE_ON_DEPLOY", "required": false, "secret": false, "example": "", "description": "1 = `predeploy` (the container deploy's db-check step) applies pending migrations before it checks the schema" }
+      ],
+      "files": [{ "from": "files", "to": "" }],
+      "locked": [
+        { "from": "runtime/db/checks.ts", "to": "src/kit/db/checks.ts" },
+        { "from": "runtime/db/cli.ts", "to": "src/kit/db/cli.ts" },
+        { "from": "runtime/db/clock.ts", "to": "src/kit/db/clock.ts" },
+        { "from": "runtime/db/connect.ts", "to": "src/kit/db/connect.ts" },
+        { "from": "runtime/db/migrate.ts", "to": "src/kit/db/migrate.ts" },
+        { "from": "runtime/db/mysql.ts", "to": "src/kit/db/mysql.ts" },
+        { "from": "runtime/db/repo.ts", "to": "src/kit/db/repo.ts" },
+        { "from": "runtime/db/resilient.ts", "to": "src/kit/db/resilient.ts" },
+        { "from": "runtime/db/schema.ts", "to": "src/kit/db/schema.ts" },
+        { "from": "runtime/db/sqlite.ts", "to": "src/kit/db/sqlite.ts" }
+      ],
+      "backup": [
+        { "engine": "sqlite", "path": "data/{{kit.name}}.db", "envKey": "DATABASE_URL", "when": { "db": ["sqlite"] } },
+        { "engine": "mysql", "database": "{{kit.dbName}}", "envKey": "DATABASE_URL", "when": { "db": ["mysql"] } }
+      ],
+      "usage": "usage.md",
+      "next": ["{{kit.apiDir}}: cp .env.example .env, then `npm run db:migrate -- up` and `npm run db:seed` (the API answers /health/ready with 503 until the schema is migrated)"]
+    }
+  }
 }

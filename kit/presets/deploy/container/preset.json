@@ -20,14 +20,18 @@
     "project": {
       "files": [
         { "from": "files/compose.nuxt-app.yml", "to": "docker/docker-compose.yml", "when": { "kind": ["nuxt-app"] } },
-        { "from": "files/compose.api.yml", "to": "docker/docker-compose.yml", "when": { "kind": ["api"] } },
-        { "from": "files/compose.fullstack.yml", "to": "docker/docker-compose.yml", "when": { "kind": ["fullstack"] } },
+        { "from": "files/compose.api.yml", "to": "docker/docker-compose.yml", "when": { "kind": ["api"], "without": ["db"] } },
+        { "from": "files/compose.api.db.yml", "to": "docker/docker-compose.yml", "when": { "kind": ["api"], "with": ["db"] } },
+        { "from": "files/compose.fullstack.yml", "to": "docker/docker-compose.yml", "when": { "kind": ["fullstack"], "without": ["db"] } },
+        { "from": "files/compose.fullstack.db.yml", "to": "docker/docker-compose.yml", "when": { "kind": ["fullstack"], "with": ["db"] } },
         { "from": "files/deploy.nuxt-app.conf", "to": "docker/deploy.conf", "when": { "kind": ["nuxt-app"] } },
         { "from": "files/deploy.api.conf", "to": "docker/deploy.conf", "when": { "kind": ["api"] } },
         { "from": "files/deploy.fullstack.conf", "to": "docker/deploy.conf", "when": { "kind": ["fullstack"] } },
         { "from": "files/env.nuxt-app.example", "to": "docker/env.example", "when": { "kind": ["nuxt-app"] } },
-        { "from": "files/env.api.example", "to": "docker/env.example", "when": { "kind": ["api"] } },
-        { "from": "files/env.fullstack.example", "to": "docker/env.example", "when": { "kind": ["fullstack"] } }
+        { "from": "files/env.api.example", "to": "docker/env.example", "when": { "kind": ["api"], "without": ["db"] } },
+        { "from": "files/env.api.db.example", "to": "docker/env.example", "when": { "kind": ["api"], "with": ["db"] } },
+        { "from": "files/env.fullstack.example", "to": "docker/env.example", "when": { "kind": ["fullstack"], "without": ["db"] } },
+        { "from": "files/env.fullstack.db.example", "to": "docker/env.example", "when": { "kind": ["fullstack"], "with": ["db"] } }
       ],
       "usage": "usage.md",
       "next": ["copy deploy-docker.sh from your docker-node template into docker/ (kept identical everywhere by that template's own check), then review docker/deploy.conf"]
