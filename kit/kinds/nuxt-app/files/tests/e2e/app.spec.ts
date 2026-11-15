@@ -35,3 +35,14 @@ test('unknown routes show the layer error page', async ({ page }) => {
   await page.goto('/does-not-exist')
   await expect(page.getByText('404')).toBeVisible()
 })
+
+// The UI server answers every page with the baseline security headers (nuxt.config.ts, routeRules).
+test('pages carry the security headers', async ({ request }) => {
+  for (const path of ['/', '/does-not-exist']) {
+    const headers = (await request.get(path)).headers()
+    expect(headers['x-content-type-options'], path).toBe('nosniff')
+    expect(headers['x-frame-options'], path).toBe('DENY')
+    expect(headers['content-security-policy'], path).toContain("frame-ancestors 'none'")
+    expect(headers['referrer-policy'], path).toBe('strict-origin-when-cross-origin')
+  }
+})

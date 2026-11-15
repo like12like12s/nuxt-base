@@ -16,7 +16,14 @@ const PLACEHOLDER = { registry: 'registry.example.com', host: 'deploy-host', dom
 // rendered: free text may not contain a line break or another control character (a title is rendered into `//` and `#`
 // comment lines), and everything that names a machine or a location has a closed alphabet — no quotes, spaces, `$`,
 // backticks, `;` or parentheses, so the value cannot become code wherever it is pasted.
-const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/
+// C0 / C1 control characters and the two Unicode line separators (JavaScript ends a `//` comment at those too).
+const hasControl = (text) => {
+  for (const ch of text) {
+    const code = ch.codePointAt(0)
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029) return true
+  }
+  return false
+}
 const HOSTLIKE = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]*[A-Za-z0-9])?$/
 const REGISTRY = /^[A-Za-z0-9](?:[A-Za-z0-9._:/-]*[A-Za-z0-9])?$/
 const LAYER_REF = /^[A-Za-z0-9@._~/:#+-]+$/
@@ -45,7 +52,7 @@ function validateContext(input, lenient = false) {
     if (empty(value)) return
     if (typeof value !== 'string') return bad(target, prop, key, `${key} must be a string`)
     if (value.length > max) return bad(target, prop, key, `${key} must be at most ${max} characters`)
-    if (CONTROL.test(value)) return bad(target, prop, key, `${key} must be a single line without control characters`)
+    if (hasControl(value)) return bad(target, prop, key, `${key} must be a single line without control characters`)
   }
   const token = (target, prop, key, pattern, what) => {
     const value = target[prop]

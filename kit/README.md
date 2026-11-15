@@ -229,7 +229,8 @@ written for an agent working inside the project, where it lands as `.memory/docs
 
 ```
 nuxt-app    Nuxt 4 SPA extending the layer by git tag · DESIGN.md · vitest (nuxt env) · playwright e2e against the
-            built app that fails on any pageerror / console error · gate = typecheck + unit
+            built app that fails on any pageerror / console error · gate = typecheck + unit · security headers on
+            every page (nosniff, no framing, referrer policy) through `routeRules`
 api         hono on Node (tsx dev, tsc build -> dist/) · src/config.ts = zod env schema: a missing key stops the boot
             and is named, no value is ever printed · /health/live · one JSON log line per request · graceful shutdown
             · src/app.ts creates the app · src/kit/** = locked runtime · `--with api,db` replaces the plain app

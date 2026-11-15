@@ -88,6 +88,11 @@
         "test-results/",
         "playwright-report/"
       ],
+      "nuxtConfig": [
+        "// Security headers on everything the UI server sends (pages, assets): no framing, no MIME sniffing. The CSP only",
+        "// restricts framing — a SPA shell has inline bootstrap scripts, so tighten script-src per app, deliberately.",
+        "routeRules: { '/**': { headers: { 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'referrer-policy': 'strict-origin-when-cross-origin', 'content-security-policy': \"frame-ancestors 'none'\" } } },"
+      ],
       "usage": "usage.md"
     }
   },

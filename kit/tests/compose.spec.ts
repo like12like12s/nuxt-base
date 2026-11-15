@@ -296,6 +296,17 @@ describe('new — hostile --context values', () => {
   })
 })
 
+// L12: only the hono API had security headers; the pages of a generated UI had none
+describe('new — UI security headers', () => {
+  it.each([['nuxt-app', ''], ['fullstack', 'ui/']])('%s: nuxt.config.ts sets them for every route of the UI server', (kind, ui) => {
+    const { dir, r } = scaffold(['--kind', kind])
+    expect(r.status).toBe(0)
+    const config = read(dir, `${ui}nuxt.config.ts`)
+    expect(config).toContain("  routeRules: { '/**': { headers: { 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'referrer-policy': 'strict-origin-when-cross-origin', 'content-security-policy': \"frame-ancestors 'none'\" } } },\n")
+    expect(read(dir, `${ui}tests/e2e/app.spec.ts`)).toContain('pages carry the security headers')
+  })
+})
+
 // M2 / M14
 describe('new — container names and the privacy note', () => {
   it.each([['nuxt-app', []], ['api', []], ['api', ['--with', 'api,db']], ['fullstack', []], ['fullstack', ['--with', 'api,db']]] as [string, string[]][])('%s %j: no fixed container_name; services reach each other by service name', (kind, extra) => {
