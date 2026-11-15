@@ -2,6 +2,9 @@
 import { describe, expect, it } from 'vitest'
 import { SERVICE, VERSION } from '../src/app.js'
 import { forbidden, unauthorized } from '../src/kit/api/errors.js'
+// @kit:if auth
+import { publicRoute } from '../src/kit/auth/guard.js'
+// @kit:end
 import { KIT_VERSION } from '../src/kit/api/kit-version.js'
 import { TRACE_ID, useApp } from './helpers.js'
 
@@ -79,8 +82,14 @@ describe('error shape — { error: { code, message, details?, traceId } } on eve
 
   it('401 UNAUTHORIZED and 403 FORBIDDEN', async () => {
     const { app, api } = t.build()
+    // @kit:if auth
+    // (every route declares who may call it — also a test route outside /api/v1, or the auth guard refuses it)
+    app.get('/_test/401', publicRoute(), () => { throw unauthorized() })
+    app.get('/_test/403', publicRoute(), () => { throw forbidden() })
+    // @kit:else
     app.get('/_test/401', () => { throw unauthorized() })
     app.get('/_test/403', () => { throw forbidden() })
+    // @kit:end
     expectError(await api.get('/_test/401'), 401, 'UNAUTHORIZED')
     expectError(await api.get('/_test/403'), 403, 'FORBIDDEN')
   })
@@ -99,7 +108,11 @@ describe('error shape — { error: { code, message, details?, traceId } } on eve
 
   it('500 INTERNAL never leaks the cause: no message, no stack, no SQL — the log has it, under the same trace id', async () => {
     const { app, api, lines } = t.build()
+    // @kit:if auth
+    app.get('/_test/500', publicRoute(), () => { throw new Error('select * from users where password = hunter2') })
+    // @kit:else
     app.get('/_test/500', () => { throw new Error('select * from users where password = hunter2') })
+    // @kit:end
     const res = await api.get('/_test/500')
     expectError(res, 500, 'INTERNAL')
     expect(res.body.error.message).toBe('Internal server error')

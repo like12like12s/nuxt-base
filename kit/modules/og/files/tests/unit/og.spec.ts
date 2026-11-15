@@ -31,8 +31,9 @@ describe('link previews', () => {
     for (const path of ['//evil.example/x', '/\\evil.example/x', 'https://evil.example/x']) {
       const { url, trusted } = resolveRequest(event(path), { siteUrl: 'https://app.example.com' })
       expect(trusted).toBe(true)
-      expect(ogTags({ title: 't', image: '/og.png' }, url), path).not.toContain('evil.example/x"')
       expect(url.origin, path).toBe('https://app.example.com')
+      // whatever is left of the path is a path on this site — no tag points at the other host
+      expect(ogTags({ title: 't', image: '/og.png' }, url), path).not.toMatch(/(?:content|href)="(?:https?:)?\/\/evil\.example/)
     }
     // no site URL configured: nothing is built from the request's host
     const unknown = resolveRequest(event('/p'))
