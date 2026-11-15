@@ -160,6 +160,15 @@ async function withServer(log, cmd, args, { cwd, extraEnv, ...opts }, probe) {
   return result
 }
 
+// Image builds and removals run one at a time across combos. Combos share base layers; removing one combo's image
+// while another combo is extracting the same layers makes the build fail with "parent snapshot … does not exist".
+let dockerQueue = Promise.resolve()
+function dockerImage(log, args, opts) {
+  const result = dockerQueue.then(() => run(log, 'docker', args, opts))
+  dockerQueue = result.catch(() => undefined)
+  return result
+}
+
 const scaffold = (log, args, opts = {}) => run(log, process.execPath, [BIN, ...args], { cwd: REPO, timeout: 60_000, ...opts })
 
 // The kit's data-layer and test-kit unit tests, on MySQL (in `npm run gate` they run on SQLite only).
@@ -297,7 +306,7 @@ async function gateCombo(combo, index) {
         const tag = `nuxt-base-kit-gate-${process.pid}-${index}-${svc}`
         begin(`container: docker build ${svc}`)
         images.add(tag)
-        await run(log, 'docker', ['build', '-q', '-t', tag, join(dir, svc)], { cwd: dir, timeout: 900_000 })
+        await dockerImage(log, ['build', '-q', '-t', tag, join(dir, svc)], { cwd: dir, timeout: 900_000 })
         begin(`container: image ${svc} runs and answers its health path`)
         // db module: the image must carry a working db CLI (no npm, no tsx in it) — what the compose db-check step runs
         const imageDb = svc === 'api' && plan.db ? ['-e', 'DATABASE_URL=sqlite:/tmp/gate.db'] : []
@@ -317,7 +326,7 @@ async function gateCombo(combo, index) {
         if (user !== 'node') throw new StepError(`container runs as "${user}", expected "node"`)
         await run(log, 'docker', ['rm', '-f', cid], { cwd: dir, timeout: 60_000 })
         containers.delete(cid)
-        await run(log, 'docker', ['rmi', '-f', tag], { cwd: dir, timeout: 60_000 })
+        await dockerImage(log, ['rmi', '-f', tag], { cwd: dir, timeout: 60_000 })
         images.delete(tag)
       }
     }
@@ -331,7 +340,7 @@ async function gateCombo(combo, index) {
       const compose = (args, opts = {}) => run(log, 'docker', ['compose', '-p', project, '-f', 'docker-compose.yml', ...args], { cwd: dockerDir, timeout: 180_000, ...opts })
       const envFile = (migrate) => writeFileSync(join(dockerDir, '.env'), `API_TAG=${apiTag}\nAPI_PORT=${port + 6}\nDATABASE_URL=sqlite:./data/gate.db\nDB_MIGRATE_ON_DEPLOY=${migrate}\n`)
       begin('container: compose — schema behind = `up` fails and no api container runs')
-      await run(log, 'docker', ['build', '-q', '-t', image, join(dir, 'api')], { cwd: dir, timeout: 900_000 })
+      await dockerImage(log, ['build', '-q', '-t', image, join(dir, 'api')], { cwd: dir, timeout: 900_000 })
       images.add(image)
       mkdirSync(join(dockerDir, 'data'), { recursive: true })
       chmodSync(join(dockerDir, 'data'), 0o777) // the container user (node) writes the SQLite file here
@@ -350,7 +359,7 @@ async function gateCombo(combo, index) {
       } finally {
         await compose(['down', '-v', '--remove-orphans'], { expect: null }).catch(() => {})
         composeProjects.delete(project)
-        await run(log, 'docker', ['rmi', '-f', image], { cwd: dir, timeout: 60_000, expect: null }).catch(() => {})
+        await dockerImage(log, ['rmi', '-f', image], { cwd: dir, timeout: 60_000, expect: null }).catch(() => {})
         images.delete(image)
         rmSync(join(dockerDir, '.env'), { force: true })
         try { rmSync(join(dockerDir, 'data'), { recursive: true, force: true }) } catch { /* owned by the container user */ }
