@@ -1,0 +1,25 @@
+# Opt-in CI for nuxt-base: the same check as the local gate, plus the secret scan and dependency audit.
+name: gate
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks scans history
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm install
+      # nuxt-base only: its gate runs the layer's playwright suite, which needs a browser on the runner.
+      - run: npx playwright install --with-deps chromium
+      # gitleaks is not preinstalled on the runner; gate:ci prints a visible notice and continues without it.
+      - run: npm run gate:ci
