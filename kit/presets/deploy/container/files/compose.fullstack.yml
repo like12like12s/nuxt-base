@@ -10,8 +10,12 @@ services:
     image: {{kit.registry}}/{{kit.name}}-api:${API_TAG:-latest}
     restart: unless-stopped
     init: true   # node as PID 1 ignores SIGTERM: without init every stop waits for the kill timeout
-    ports:
-      - "${API_PORT:-{{kit.apiPort}}}:3000"
+    # No host port: the UI reaches the API as http://api:3000 over the compose network and nothing else has to. Its
+    # health is the image's HEALTHCHECK (`docker compose ps`; the ui service waits for it), and from the host:
+    #   docker compose exec api wget -qO- http://127.0.0.1:3000/health/ready
+    # Something outside compose must call the API? Publish it on loopback only (and put a proxy with auth in front):
+    # ports:
+    #   - "127.0.0.1:${API_PORT:-{{kit.apiPort}}}:3000"
     env_file: .env
     environment:
       APP_IMAGE_TAG: ${API_TAG:-}   # GET /version reports the commit at the end of the deployed tag

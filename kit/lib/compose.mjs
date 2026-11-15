@@ -249,7 +249,10 @@ export function compose(kit, input) {
 
   const services = parts.map((p) => {
     const role = p.type === 'api' ? 'api' : 'web'
-    return { id: `${sel.name}-${role}`, name: role === 'api' ? 'API' : 'Web', type: role, port: p.port, healthPath: role === 'api' ? '/health/live' : '/' }
+    // The API of a fullstack container deploy has no host port (only the UI talks to it, over the compose network):
+    // `internal: true` tells whoever registers the services that `port` is not something to probe from outside.
+    const internal = role === 'api' && preset?.name === 'container' && parts.length > 1
+    return { id: `${sel.name}-${role}`, name: role === 'api' ? 'API' : 'Web', type: role, port: p.port, healthPath: role === 'api' ? '/health/live' : '/', ...(internal ? { internal: true } : {}) }
   })
 
   const baseVars = {
@@ -287,7 +290,7 @@ export function compose(kit, input) {
       sel.db === 'mysql'
         ? `mysql://<user>:<password>@${sel.answers.mysqlHost ?? 'db.example.com'}:3306/${sel.name.replaceAll('-', '_')}`
         : `sqlite:./data/${sel.name}.db`,
-    services: services.map((s) => `- ${s.name} (\`${s.id}\`, ${s.type}) — port ${s.port}, health \`${s.healthPath}\``).join('\n'),
+    services: services.map((s) => `- ${s.name} (\`${s.id}\`, ${s.type}) — port ${s.port}${s.internal ? ' (development; deployed: no host port, compose-internal)' : ''}, health \`${s.healthPath}\``).join('\n'),
     nuxtConfig: '',
     usageSections: '',
   }

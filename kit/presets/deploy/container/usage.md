@@ -26,6 +26,12 @@ docker build -t {{kit.name}}-local <service dir>   # local image build, no regis
   (`20260131-235959-abc1234`) becomes `commit`, and the Dockerfile stamps the build time into the image
   (`builtAt`). A deploy script that wants exact values passes two build args, which win over both:
   `docker build --build-arg APP_COMMIT=$(git rev-parse HEAD) --build-arg APP_BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) …`
+<!-- @kit:if kind:fullstack -->
+- Only the UI has a host port (`UI_PORT`). The API is not published: the UI server reaches it as `http://api:3000`
+  over the compose network, so nobody can call it around the UI. Check it with `docker compose ps` (health) or
+  `docker compose exec api wget -qO- http://127.0.0.1:3000/health/ready`; `docker-compose.yml` has a commented
+  loopback-only `ports:` block for the rare caller outside compose.
+<!-- @kit:end -->
 - Containers run as `node`, have a HEALTHCHECK (API: `/health/live`, UI: `/`), and write data only under `./data`.
 - A service dir that is a symlink to the repo root (`api -> .` / `web -> .`) is how a single-app repo fits the
   one-dir-per-image layout.

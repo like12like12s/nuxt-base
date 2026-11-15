@@ -38,7 +38,7 @@ the exit code (without `--json`: the message on stderr).
 
 ```
 new     { ok, dir, name, title, description, kind, modules[], db, deploy, kitVersion, files[], locked[],
-          services[{ id, name, type: "web"|"api", port, healthPath }], env[{ key, required, secret }],
+          services[{ id, name, type: "web"|"api", port, healthPath, internal? }], env[{ key, required, secret }],
           backup[{ id, service, engine: "sqlite"|"mysql", envKey, path? | database? }], next[] }
           (+ "dryRun": true with --dry-run — same plan, nothing written)
 add     { ok, dir, type, name, generator, files[], patched[], next[] }
@@ -57,6 +57,9 @@ list    { ok, kitVersion, layerRef, kinds[{ name, description, parts[{ type, dir
   the name. Without a `title` in `--context` (absent, blank, or just the name again) it is derived from the name
   (`kit-ref` -> `Kit Ref`); without a `description`, `<Title> — scaffolded with the nuxt-base kit`. No generated
   document has an empty bullet or heading, whatever was passed.
+- `services[].internal: true` (only present when true): the API of a `fullstack` project deployed with the
+  `container` preset. The compose file publishes no host port for it — the UI reaches it over the compose network —
+  so `port` is its development port only: do not register a health probe or a route against it on the deploy host.
 - Ports: one-part kinds use `--port` (default 3000). `fullstack`: `--port N` alone = API on N, UI on N+1 (port
   pairing); with `--api-port`, `--port` is the UI port.
 - `backup` is what a backup job has to cover (empty without the `db` module): `path` = the SQLite file relative to
@@ -346,7 +349,9 @@ container   multi-stage Dockerfile + .dockerignore per part (locked) · docker/d
             trailing commit is used) and the API image stamps its build time; the build args `APP_COMMIT` /
             `APP_BUILT_AT` override both when a script passes them. No `container_name`: compose names containers
             `<project>-<service>-1`, so two stages of one app run on one host (second stage: another directory with
-            `COMPOSE_PROJECT_NAME` and other ports in its `.env`). The deploy script itself is NOT in the kit: it carries
+            `COMPOSE_PROJECT_NAME` and other ports in its `.env`). `fullstack`: only the UI has a host port; the
+            API is reachable inside the compose network alone (a commented loopback-only `ports:` block is there
+            for the rare outside caller), and its health is the image HEALTHCHECK the UI service waits for. The deploy script itself is NOT in the kit: it carries
             site-specific defaults, so the wrapper (or the developer) copies it from the private docker-node template.
 pm2         ecosystem.config.cjs (time: true, ports in env only). Nothing is started: the generated usage.md documents
             starting it through the Pilot API.
@@ -385,7 +390,10 @@ For projects with the `db` module it also proves, on the built app: the committe
 `schema.d.ts`) are exactly what the code generates; `db check` fails and `/health/ready` is 503 until `migrate up`;
 seeding twice changes nothing; list / create / soft delete, the error shape and the trace id over real HTTP; the
 backup rule of `migrate`; in the image, the compose `db-check` gate (schema behind = `up` fails and no API runs,
-`DB_MIGRATE_ON_DEPLOY=1` = migrated and ready, and a second stage of the same compose file running next to it).
+`DB_MIGRATE_ON_DEPLOY=1` = migrated and ready, and a second stage of the same compose file running next to it);
+`fullstack+std+container` runs the fullstack compose file the same way and shows that the API container publishes no
+host port (even with `API_PORT` set), is healthy, answers `/health/ready` through `compose exec`, and serves API
+calls through the UI; the API image answers `/version` with a commit and a build time, with and without build args.
 MySQL: the gate uses `TEST_MYSQL_URL` when set, else starts a
 throwaway `mysql:8.4` container, else prints `NOTICE … SKIPPED`; the `--db mysql` combo runs its whole suite and its
 CLI there (in a `test_gate_*` schema that is dropped again), and the job `kit-runtime@mysql` runs the kit's

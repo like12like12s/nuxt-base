@@ -375,6 +375,39 @@ describe('new — container names and the privacy note', () => {
   })
 })
 
+// Finding #14: the fullstack compose file published the API on every interface of the deploy host although only the
+// UI (same compose network) ever calls it.
+describe('new — fullstack container: the API has no host port', () => {
+  const publishes = (compose: string, service: string) => new RegExp(`\\n  ${service}:\\n(?:(?:    .*| *#.*)?\\n)*?    ports:\\n`).test(compose)
+
+  it.each([[[]], [['--with', 'api,db']], [['--with', 'db,auth,api,trace,og,security,jobs,notify']]] as [string[]][])('fullstack %j: only the UI is published; the API is compose-internal and marked internal', (extra) => {
+    const { dir, r } = scaffold(['--kind', 'fullstack', '--deploy', 'container', '--port', '3200', ...extra])
+    const compose = read(dir, 'docker/docker-compose.yml')
+    expect(publishes(compose, 'ui')).toBe(true)
+    expect(publishes(compose, 'api')).toBe(false)
+    expect(compose).toContain('      API_URL: http://api:3000')
+    // the documented way out is loopback only, and commented
+    const published = compose.split('\n').filter((line) => /^\s*(#\s*)?- "/.test(line) && line.includes(':3000"'))
+    expect(published).toEqual(['    #   - "127.0.0.1:${API_PORT:-3200}:3000"', '      - "${UI_PORT:-3201}:3000"'])
+    expect(read(dir, 'docker/env.example')).not.toMatch(/^API_PORT=/m)
+    expect(r.json.services).toEqual([
+      { id: 'demo-app-api', name: 'API', type: 'api', port: 3200, healthPath: '/health/live', internal: true },
+      { id: 'demo-app-web', name: 'Web', type: 'web', port: 3201, healthPath: '/' },
+    ])
+    expect(read(dir, '.memory/docs/guides/usage.md')).toContain('Only the UI has a host port')
+  })
+
+  it('everything else is unchanged: a lone API stays published, and no other preset marks a service internal', () => {
+    for (const extra of [[], ['--with', 'api,db']]) {
+      const { dir, r } = scaffold(['--kind', 'api', '--deploy', 'container', ...extra])
+      expect(publishes(read(dir, 'docker/docker-compose.yml'), 'api')).toBe(true)
+      expect(r.json.services.some((s: any) => 'internal' in s)).toBe(false)
+      expect(read(dir, '.memory/docs/guides/usage.md')).not.toContain('Only the UI has a host port')
+    }
+    for (const deploy of [[], ['--deploy', 'pm2']]) expect(scaffold(['--kind', 'fullstack', ...deploy]).r.json.services.some((s: any) => 'internal' in s)).toBe(false)
+  })
+})
+
 describe('new — determinism and purity', () => {
   it.each(COMBOS)('%s + deploy %s: the same inputs give byte-identical output', (kind, deploy) => {
     const args = ['--kind', kind, '--port', '3920', '--with', 'ci-github', ...(deploy ? ['--deploy', deploy] : [])]

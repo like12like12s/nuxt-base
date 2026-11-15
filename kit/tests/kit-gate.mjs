@@ -369,16 +369,38 @@ async function gateCombo(combo, index) {
 
     if (combo.deploy === 'container' && plan.db && docker) {
       // The compose file's db-check gate, for real: the API container starts only when the database matches the image.
+      // fullstack: the API has no host port — everything is asked through the UI, which is all a deploy can reach.
       const apiTag = `gate-${process.pid}-${index}`
       const image = `registry.example.com/gate-app-api:${apiTag}`
+      const uiImage = `registry.example.com/gate-app-ui:${apiTag}`
       const project = `kit-gate-${process.pid}-${index}`
       const second = `${project}-second`
       const dockerDir = join(dir, 'docker')
       const compose = (args, opts = {}) => run(log, 'docker', ['compose', '-p', project, '-f', 'docker-compose.yml', ...args], { cwd: dockerDir, timeout: 180_000, ...opts })
-      const envFile = (migrate) => writeFileSync(join(dockerDir, '.env'), `API_TAG=${apiTag}\nAPI_PORT=${port + 6}\nDATABASE_URL=sqlite:./data/gate.db\nDB_MIGRATE_ON_DEPLOY=${migrate}\n`)
+      // API_PORT is set on purpose in the fullstack case too: the compose file must not honour it.
+      const ports = (base) => (both ? `UI_TAG=${apiTag}\nUI_PORT=${base + 1}\nAPI_PORT=${base}\n` : `API_PORT=${base}\n`)
+      const envFile = (migrate) => writeFileSync(join(dockerDir, '.env'), `API_TAG=${apiTag}\n${ports(port + 6)}DATABASE_URL=sqlite:./data/gate.db\nDB_MIGRATE_ON_DEPLOY=${migrate}\n`)
+      // Ready = what an operator can reach: the API's own port, or — fullstack — the UI (compose starts it only once
+      // the API container is healthy) and an API call through its /api proxy.
+      const ready = async (base, ms) => {
+        if (!both) {
+          const body = await (await waitFor(`http://127.0.0.1:${base}/health/ready`, ms)).json()
+          if (body.checks.some((c) => c.status !== 'ok')) throw new StepError(`/health/ready in compose: ${JSON.stringify(body)}`)
+          return
+        }
+        await waitFor(`http://127.0.0.1:${base + 1}/`, ms)
+        const res = await fetch(`http://127.0.0.1:${base + 1}/api/v1/items`, { signal: AbortSignal.timeout(5000) })
+        const expected = plan.modules.includes('auth') ? 401 : 200 // either way the answer is the API's, in its error shape
+        const body = await res.json()
+        if (res.status !== expected || !res.headers.get('x-trace-id') || (expected === 200 ? !Array.isArray(body.data) : body.error?.code !== 'UNAUTHORIZED')) throw new StepError(`the API through the UI in compose: ${res.status} ${JSON.stringify(body)}`)
+      }
       begin('container: compose — schema behind = `up` fails and no api container runs')
       await dockerImage(log, ['build', '-q', '-t', image, join(dir, 'api')], { cwd: dir, timeout: 900_000 })
       images.add(image)
+      if (both) {
+        await dockerImage(log, ['build', '-q', '-t', uiImage, join(dir, 'ui')], { cwd: dir, timeout: 900_000 })
+        images.add(uiImage)
+      }
       mkdirSync(join(dockerDir, 'data'), { recursive: true })
       chmodSync(join(dockerDir, 'data'), 0o777) // the container user (node) writes the SQLite file here
       composeProjects.set(project, dockerDir)
@@ -388,19 +410,32 @@ async function gateCombo(combo, index) {
         if (!/db-check.*didn't complete successfully/.test(refused.out)) throw new StepError('compose up did not stop at the db-check step')
         const running = (await compose(['ps', '-q', '--status', 'running'])).out.trim()
         if (running) throw new StepError('a container is running although the db-check step failed')
-        begin('container: compose — DB_MIGRATE_ON_DEPLOY=1 migrates, then the api starts and is ready')
+        begin(`container: compose — DB_MIGRATE_ON_DEPLOY=1 migrates, then the api starts and is ready${both ? ' (asked through the UI)' : ''}`)
         envFile('1')
         await compose(['up', '-d'])
-        const ready = await (await waitFor(`http://127.0.0.1:${port + 6}/health/ready`, 40_000)).json()
-        if (ready.checks.some((c) => c.status !== 'ok')) throw new StepError(`/health/ready in compose: ${JSON.stringify(ready)}`)
+        await ready(port + 6, both ? 90_000 : 40_000)
+        if (both) {
+          begin('container: compose — the API has no host port; its health is still visible (HEALTHCHECK, exec)')
+          const apiCid = (await compose(['ps', '-q', 'api'])).out.trim()
+          const published = (await run(log, 'docker', ['port', apiCid], { cwd: dockerDir, timeout: 15_000 })).out.trim()
+          if (published) throw new StepError(`the api container publishes a host port: ${published}`)
+          const direct = await fetch(`http://127.0.0.1:${port + 6}/health/live`, { signal: AbortSignal.timeout(3000) }).then((res) => `HTTP ${res.status}`, () => null)
+          if (direct) throw new StepError(`the API answers on host port ${port + 6} (${direct}) although the compose file publishes none`)
+          const health = (await run(log, 'docker', ['inspect', '-f', '{{.State.Health.Status}}', apiCid], { cwd: dockerDir, timeout: 15_000 })).out.trim()
+          if (health !== 'healthy') throw new StepError(`api container health is "${health}", expected "healthy"`)
+          const inside = JSON.parse((await compose(['exec', '-T', 'api', 'wget', '-qO-', 'http://127.0.0.1:3000/health/ready'])).out.trim().split('\n').pop())
+          if (inside.status !== 'ok') throw new StepError(`/health/ready inside the api container: ${JSON.stringify(inside)}`)
+          const uiPublished = (await run(log, 'docker', ['port', (await compose(['ps', '-q', 'ui'])).out.trim()], { cwd: dockerDir, timeout: 15_000 })).out.trim()
+          if (!uiPublished.includes(`:${port + 7}`)) throw new StepError(`the ui container is not published on ${port + 7}: ${uiPublished}`)
+        }
         // The templates set no container_name, so the same compose file runs twice on one host: a second stage is
         // another project name (COMPOSE_PROJECT_NAME in its .env) and other host ports.
         begin('container: compose — a second stage of the app (COMPOSE_PROJECT_NAME) runs next to the first on one host')
-        writeFileSync(join(dockerDir, '.env.second'), `COMPOSE_PROJECT_NAME=${second}\nAPI_TAG=${apiTag}\nAPI_PORT=${port + 7}\n`)
+        writeFileSync(join(dockerDir, '.env.second'), `COMPOSE_PROJECT_NAME=${second}\nAPI_TAG=${apiTag}\n${ports(port + 8)}`)
         composeProjects.set(second, dockerDir)
         await run(log, 'docker', ['compose', '--env-file', '.env.second', '-f', 'docker-compose.yml', 'up', '-d'], { cwd: dockerDir, timeout: 180_000 })
-        await waitFor(`http://127.0.0.1:${port + 7}/health/ready`, 40_000)
-        await waitFor(`http://127.0.0.1:${port + 6}/health/ready`, 10_000) // the first stage was not replaced
+        await ready(port + 8, both ? 90_000 : 40_000)
+        await ready(port + 6, 10_000) // the first stage was not replaced
         const stages = (await run(log, 'docker', ['ps', '--filter', 'label=com.docker.compose.service=api', '--format', '{{.Names}}'], { cwd: dockerDir, timeout: 30_000 })).out.trim().split('\n').filter((name) => name.startsWith(`${project}-`)).sort()
         if (stages.join() !== [`${project}-api-1`, `${second}-api-1`].sort().join()) throw new StepError(`expected one api container per stage, found: ${stages.join(', ')}`)
       } finally {
@@ -409,8 +444,10 @@ async function gateCombo(combo, index) {
         rmSync(join(dockerDir, '.env.second'), { force: true })
         await compose(['down', '-v', '--remove-orphans'], { expect: null }).catch(() => {})
         composeProjects.delete(project)
-        await dockerImage(log, ['rmi', '-f', image], { cwd: dir, timeout: 60_000, expect: null }).catch(() => {})
-        images.delete(image)
+        for (const built of both ? [image, uiImage] : [image]) {
+          await dockerImage(log, ['rmi', '-f', built], { cwd: dir, timeout: 60_000, expect: null }).catch(() => {})
+          images.delete(built)
+        }
         rmSync(join(dockerDir, '.env'), { force: true })
         try { rmSync(join(dockerDir, 'data'), { recursive: true, force: true }) } catch { /* owned by the container user */ }
       }

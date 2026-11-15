@@ -323,6 +323,8 @@ export const combos = [
   { id: 'api+std-mysql', kind: 'api', with: ['api', 'db'], db: 'mysql', checks: [apiStandard] },
   { id: 'api+std+container', kind: 'api', with: ['api', 'db'], db: 'sqlite', deploy: 'container' },
   { id: 'fullstack+std', kind: 'fullstack', with: ['api', 'db'], e2e: true, checks: [apiStandard, typedClient] },
+  // the fullstack compose file for real: db-check gate, the API without a host port, health and API calls through the UI
+  { id: 'fullstack+std+container', kind: 'fullstack', with: ['api', 'db'], db: 'sqlite', deploy: 'container', layer: 'tag' },
   // task E: every module, then the playbook generators on the generated project
   { id: 'fullstack+full', kind: 'fullstack', with: ['db', 'auth', 'api', 'trace', 'og', 'security', 'jobs', 'notify'], e2e: true, checks: [fullModules] },
   { id: 'api+full+container', kind: 'api', with: ['auth', 'trace', 'security', 'jobs', 'notify'], db: 'sqlite', deploy: 'container', checks: [fullModules] },
