@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { cleanup, cli, read, snapshot, tmp } from './helpers'
 // @ts-expect-error plain ESM, no types
-import { compose } from '../lib/compose.mjs'
+import { compose, composeFromManifest } from '../lib/compose.mjs'
 // @ts-expect-error plain ESM, no types
 import { loadKit } from '../lib/kit.mjs'
 import rootPkg from '../../package.json'
@@ -187,6 +187,131 @@ describe('new — deploy presets and CI', () => {
     const { dir, r } = scaffold(['--kind', 'api', '--with', 'ci-github'])
     expect(r.json.modules).toEqual(['base', 'ci-github'])
     expect(read(dir, '.github/workflows/gate.yml')).toContain('npm run gate:ci')
+  })
+})
+
+// M1 (review t1097): --context values were pasted raw into source files and into docker/deploy.conf (sourced by bash).
+describe('new — hostile --context values', () => {
+  const withContext = (context: unknown, args = ['--kind', 'fullstack', '--deploy', 'container', '--with', 'trace,auth', '--db', 'mysql']) => {
+    const ctx = join(tmp('ctx'), 'ctx.json')
+    writeFileSync(ctx, JSON.stringify(context))
+    return scaffold([...args, '--context', ctx], 'hostile')
+  }
+
+  it.each([
+    ['title with a line break (code after a // comment)', { title: 'Shop\nimport("node:child_process"); console.log("INJECTED")' }],
+    ['title with a JS line separator', { title: 'Shop\u2028alert(1)' }],
+    ['title that is not a string', { title: { toString: 'x' } }],
+    ['description with a carriage return', { description: 'fine\r\n---\nname: other' }],
+    ['deploy.host with a command substitution', { deploy: { host: 'h$(id>/tmp/x)' } }],
+    ['deploy.host with backticks', { deploy: { host: 'h`id`' } }],
+    ['deploy.user with a second command', { deploy: { user: 'svc; rm -rf ~' } }],
+    ['deploy.registry with a space and a quote', { deploy: { registry: 'reg.test" other' } }],
+    ['deploy.domain that closes the SMOKE_URL expansion', { deploy: { domain: 'x}"; id; : "${Y=' } }],
+    ['mysqlHost with a slash', { mysqlHost: 'db/../../etc' }],
+    ['layerRef that closes the string in nuxt.config.ts', { layerRef: "x'], hooks: { ready() { process.exit(7) } }, _: ['" }],
+    ['otlpEndpoint that is not http(s)', { otlpEndpoint: 'javascript:alert(1)' }],
+    ['otlpEndpoint with credentials', { otlpEndpoint: ['https://user', 'secret@collector.test'].join(':') }],
+    ['otlpEndpoint with a shell expansion', { otlpEndpoint: 'http://collector.test/$(id)' }],
+    ['authentikUrl with a line break', { authentikUrl: 'https://sso.test/\n## Injected heading' }],
+    ['deploy that is not an object', { deploy: 'box-1' }],
+  ])('refused, nothing written: %s', (_label, context) => {
+    const { dir, r } = withContext(context)
+    expect(r.status).toBe(2)
+    expect(r.json).toMatchObject({ ok: false, code: 'usage' })
+    expect(r.json.message).toMatch(/^--context /)
+    expect(existsSync(dir)).toBe(false)
+  })
+
+  it('awkward but harmless text is kept as data: one comment line, JSON-escaped in code', () => {
+    const title = `O'Brien "Shop" \`x\` \${process.exit(1)} */ </script> {{kit.name}} #1`
+    const { dir, r } = withContext({ title, description: 'A & B — "quoted" <b>bold</b>' })
+    expect(r.status).toBe(0)
+    const config = read(dir, 'ui/nuxt.config.ts').split('\n')
+    expect(config[0]).toBe(`// ${title} — Nuxt 4 SPA on the nuxt-base layer (the layer sets ssr: false, Tailwind 4, tokens, head defaults).`)
+    expect(config.filter((line) => line.includes('process.exit'))).toHaveLength(1) // only inside that comment
+    expect(read(dir, 'ui/app/app.config.ts')).toContain(JSON.stringify(title))
+    expect(JSON.parse(read(dir, '.scaffold.json')).answers.title).toBe(title)
+  })
+
+  it('an empty or absent title / description is valid and falls back to the default', () => {
+    for (const context of [{ title: '', description: '' }, { title: null, description: null }, {}]) {
+      const { dir, r } = withContext(context, ['--kind', 'api'])
+      expect(r.status, JSON.stringify(context)).toBe(0)
+      expect(JSON.parse(read(dir, '.scaffold.json')).answers).toMatchObject({ title: 'Demo App', description: 'Demo App — scaffolded with the nuxt-base kit' })
+      expect(read(dir, 'README.md')).toMatch(/^# Demo App\n\nDemo App — scaffolded with the nuxt-base kit\n/)
+    }
+  })
+
+  // Answers already stored in a project are never a usage error: check / update / add keep working, the value is
+  // reported as a warning and replaced by the default wherever something is rendered.
+  const store = (dir: string, change: (manifest: any) => void) => {
+    const manifest = JSON.parse(read(dir, '.scaffold.json'))
+    change(manifest)
+    writeFileSync(join(dir, '.scaffold.json'), JSON.stringify(manifest, null, 2) + '\n')
+    return manifest
+  }
+
+  it('a project scaffolded by v0.2.0 (empty description, answers as that version wrote them) passes check and update', () => {
+    const { dir } = scaffold(['--kind', 'fullstack', '--deploy', 'container', '--with', 'auth,trace,og,security,jobs', '--port', '3002'])
+    const stored = store(dir, (m) => {
+      // exactly the shape ai-cli + kit 0.2.0 produced for the reference app (hosts replaced by example values)
+      m.answers = { name: 'demo-app', title: 'demo-app', description: '', port: 3003, apiPort: 3002, deploy: { registry: 'registry.test:5000', host: 'box-1', domain: 'apps.test', user: 'svc' }, authentikUrl: 'https://auth.apps.test' }
+    })
+    const check = cli(['check', dir, '--json'])
+    expect(check.status, check.stdout + check.stderr).toBe(0)
+    expect(check.json).toMatchObject({ ok: true, clean: true, drift: [], warnings: [] })
+    const update = cli(['update', dir, '--json'])
+    expect(update.status).toBe(0)
+    expect(update.json).toMatchObject({ updated: [], warnings: [] })
+    expect(JSON.parse(read(dir, '.scaffold.json')).answers).toEqual(stored.answers) // stored answers are not rewritten
+    expect(cli(['add', 'job', 'nightly', '--dir', dir, '--json']).status).toBe(0)
+  })
+
+  it('a stored answer that is not acceptable is a warning of check / update / add — never exit 2 — and is not rendered', () => {
+    const { dir } = scaffold(['--kind', 'fullstack', '--deploy', 'container', '--with', 'jobs'])
+    store(dir, (m) => {
+      m.answers.title = 'Shop\nimport("x")'
+      m.answers.description = 'd'.repeat(501)
+      m.answers.deploy = { host: 'h$(id)', registry: 'registry.test:5000' }
+      m.answers.otlpEndpoint = 'javascript:alert(1)'
+    })
+    const check = cli(['check', dir, '--json'])
+    expect(check.status, check.stdout + check.stderr).toBe(0)
+    expect(check.json.clean).toBe(true)
+    expect(check.json.warnings).toHaveLength(4)
+    expect(check.json.warnings.join('\n')).toMatch(/answers\.title must be a single line.*\n.*answers\.description must be at most 500.*\n.*answers\.deploy\.host "h\$\(id\)".*\n.*answers\.otlpEndpoint/)
+    const update = cli(['update', dir, '--json'])
+    expect(update.status).toBe(0)
+    expect(update.json.warnings).toHaveLength(4)
+    expect(read(dir, 'docker/deploy.conf')).toMatch(/^DEPLOY_HOST=deploy-host\b/m)
+    expect(cli(['add', 'job', 'nightly', '--dir', dir, '--json']).status).toBe(0)
+    // what compose() would render for this project uses the placeholders, never the stored values
+    const plan = composeFromManifest(kit, JSON.parse(read(dir, '.scaffold.json')))
+    const rendered = plan.files.map((f: { content: string | Buffer }) => String(f.content)).join('\n')
+    for (const unsafe of ['h$(id)', 'import("x")', 'javascript:alert']) expect(rendered).not.toContain(unsafe)
+    expect(plan.files.find((f: { path: string }) => f.path === 'docker/deploy.conf').content).toMatch(/^DEPLOY_HOST=deploy-host\b/m)
+    // a valid stored value next to the bad ones is still used
+    expect(rendered).toContain('PULL_REGISTRY=registry.test:5000')
+  })
+})
+
+// M2 / M14
+describe('new — container names and the privacy note', () => {
+  it.each([['nuxt-app', []], ['api', []], ['api', ['--with', 'api,db']], ['fullstack', []], ['fullstack', ['--with', 'api,db']]] as [string, string[]][])('%s %j: no fixed container_name; services reach each other by service name', (kind, extra) => {
+    const { dir, r } = scaffold(['--kind', kind, '--deploy', 'container', ...extra])
+    expect(r.status).toBe(0)
+    const composeFile = read(dir, 'docker/docker-compose.yml')
+    expect(composeFile).not.toMatch(/^\s*container_name:/m)
+    expect(composeFile).toMatch(/^name: demo-app$/m)
+    if (kind === 'fullstack') expect(composeFile).toContain('API_URL: http://api:3000')
+    expect(read(dir, 'docker/env.example')).toContain('#COMPOSE_PROJECT_NAME=demo-app-sit')
+  })
+
+  it.each(KINDS)('%s: next[] and the README say the repository must stay private', (kind) => {
+    const { dir, r } = scaffold(['--kind', kind])
+    expect(r.json.next.filter((line: string) => /keep this repository private/.test(line))).toHaveLength(1)
+    expect(read(dir, 'README.md')).toMatch(/^## Keep this repository private$/m)
   })
 })
 

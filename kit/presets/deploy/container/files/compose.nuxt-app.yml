@@ -1,10 +1,12 @@
 # {{kit.name}} — compose file for the deploy host (/srv/{{kit.name}}/). The repo copy is the source of truth: the
 # deploy script syncs it. Tags live in .env next to it (WEB_TAG) — rollback = deploy-docker.sh --rollback <tag>.
+# No container_name anywhere: compose names containers <project>-<service>-1, so a second stage of this app on the
+# same host is the same file in another directory with COMPOSE_PROJECT_NAME=<other name> (and other host ports) in
+# its .env. Address a container through compose (`docker compose exec api …`), never by a fixed name.
 name: {{kit.name}}
 services:
   web:
     image: {{kit.registry}}/{{kit.name}}-web:${WEB_TAG:-latest}
-    container_name: {{kit.name}}-web
     restart: unless-stopped
     init: true   # node as PID 1 ignores SIGTERM: without init every stop waits for the kill timeout
     ports:

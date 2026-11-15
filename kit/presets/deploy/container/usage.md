@@ -18,6 +18,9 @@ docker build -t {{kit.name}}-local <service dir>   # local image build, no regis
 
 - Images are `<registry>/{{kit.name}}-<service>:<tag>`; the registry in `docker-compose.yml` is `{{kit.registry}}`.
 - The deploy runs `npm run gate` first and refuses a dirty tree. Each service dir needs a committed `package-lock.json`.
+- No fixed container names: compose names them `<project>-<service>-1`. Run commands through compose on the deploy
+  host (`cd /srv/{{kit.name}} && docker compose exec api …`). Two stages on one host = two directories, the second
+  with `COMPOSE_PROJECT_NAME={{kit.name}}-<stage>` and its own host ports in `.env`.
 - Containers run as `node`, have a HEALTHCHECK (API: `/health/live`, UI: `/`), and write data only under `./data`.
 - A service dir that is a symlink to the repo root (`api -> .` / `web -> .`) is how a single-app repo fits the
   one-dir-per-image layout.

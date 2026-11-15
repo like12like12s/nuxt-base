@@ -336,6 +336,7 @@ async function gateCombo(combo, index) {
       const apiTag = `gate-${process.pid}-${index}`
       const image = `registry.example.com/gate-app-api:${apiTag}`
       const project = `kit-gate-${process.pid}-${index}`
+      const second = `${project}-second`
       const dockerDir = join(dir, 'docker')
       const compose = (args, opts = {}) => run(log, 'docker', ['compose', '-p', project, '-f', 'docker-compose.yml', ...args], { cwd: dockerDir, timeout: 180_000, ...opts })
       const envFile = (migrate) => writeFileSync(join(dockerDir, '.env'), `API_TAG=${apiTag}\nAPI_PORT=${port + 6}\nDATABASE_URL=sqlite:./data/gate.db\nDB_MIGRATE_ON_DEPLOY=${migrate}\n`)
@@ -356,7 +357,20 @@ async function gateCombo(combo, index) {
         await compose(['up', '-d'])
         const ready = await (await waitFor(`http://127.0.0.1:${port + 6}/health/ready`, 40_000)).json()
         if (ready.checks.some((c) => c.status !== 'ok')) throw new StepError(`/health/ready in compose: ${JSON.stringify(ready)}`)
+        // The templates set no container_name, so the same compose file runs twice on one host: a second stage is
+        // another project name (COMPOSE_PROJECT_NAME in its .env) and other host ports.
+        begin('container: compose — a second stage of the app (COMPOSE_PROJECT_NAME) runs next to the first on one host')
+        writeFileSync(join(dockerDir, '.env.second'), `COMPOSE_PROJECT_NAME=${second}\nAPI_TAG=${apiTag}\nAPI_PORT=${port + 7}\n`)
+        composeProjects.set(second, dockerDir)
+        await run(log, 'docker', ['compose', '--env-file', '.env.second', '-f', 'docker-compose.yml', 'up', '-d'], { cwd: dockerDir, timeout: 180_000 })
+        await waitFor(`http://127.0.0.1:${port + 7}/health/ready`, 40_000)
+        await waitFor(`http://127.0.0.1:${port + 6}/health/ready`, 10_000) // the first stage was not replaced
+        const stages = (await run(log, 'docker', ['ps', '--filter', 'label=com.docker.compose.service=api', '--format', '{{.Names}}'], { cwd: dockerDir, timeout: 30_000 })).out.trim().split('\n').filter((name) => name.startsWith(`${project}-`)).sort()
+        if (stages.join() !== [`${project}-api-1`, `${second}-api-1`].sort().join()) throw new StepError(`expected one api container per stage, found: ${stages.join(', ')}`)
       } finally {
+        await run(log, 'docker', ['compose', '-p', second, '-f', 'docker-compose.yml', 'down', '-v', '--remove-orphans'], { cwd: dockerDir, timeout: 180_000, expect: null }).catch(() => {})
+        composeProjects.delete(second)
+        rmSync(join(dockerDir, '.env.second'), { force: true })
         await compose(['down', '-v', '--remove-orphans'], { expect: null }).catch(() => {})
         composeProjects.delete(project)
         await dockerImage(log, ['rmi', '-f', image], { cwd: dir, timeout: 60_000, expect: null }).catch(() => {})

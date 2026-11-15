@@ -148,7 +148,7 @@ describe('jobs module + add job', () => {
     const doc = read(dir, '.memory/docs/guides/job-nightly-sync.md')
     expect(doc).toMatch(/^---\nname: demo-app-job-nightly-sync\ndescription: .+\n---\n/)
     const entry = JSON.parse(/```json\n([\s\S]*?)\n```/.exec(doc)![1]!)
-    expect(entry).toMatchObject({ id: 'demo-app-nightly-sync', command: 'docker exec demo-app-api node dist/jobs/run.js nightly-sync', timeout: 660, notify: 'fail', enabled: true })
+    expect(entry).toMatchObject({ id: 'demo-app-nightly-sync', command: 'cd /srv/demo-app && docker compose exec -T api node dist/jobs/run.js nightly-sync', timeout: 660, notify: 'fail', enabled: true })
     expect(entry.schedule).toMatch(/^<cron/) // the operator decides
     expect(entry.device).toMatch(/^<host/)
     expect(r.json.next.join('\n')).toContain('nothing is scheduled until you do')

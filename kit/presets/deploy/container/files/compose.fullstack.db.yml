@@ -1,6 +1,9 @@
 # {{kit.name}} — compose file for the deploy host (/srv/{{kit.name}}/). The repo copy is the source of truth: the
 # deploy script syncs it. Tags live in .env next to it (API_TAG / UI_TAG) — rollback = deploy-docker.sh --rollback <tag>.
 # Data the app writes goes to ./data (bind mount). Never keep data inside the container.
+# No container_name anywhere: compose names containers <project>-<service>-1, so a second stage of this app on the
+# same host is the same file in another directory with COMPOSE_PROJECT_NAME=<other name> (and other host ports) in
+# its .env. Address a container through compose (`docker compose exec api …`), never by a fixed name.
 name: {{kit.name}}
 services:
   # Gate in front of the api container: compose starts `api` only after this exits 0, i.e. only when the database has
@@ -10,7 +13,6 @@ services:
   # replaced, run it on its own first: `docker compose run --rm db-check`.
   db-check:
     image: {{kit.registry}}/{{kit.name}}-api:${API_TAG:-latest}
-    container_name: {{kit.name}}-db-check
     restart: "no"
     command: ["node", "dist/db/cli.js", "predeploy"]
     env_file: .env
@@ -18,7 +20,6 @@ services:
       - ./data:/app/data
   api:
     image: {{kit.registry}}/{{kit.name}}-api:${API_TAG:-latest}
-    container_name: {{kit.name}}-api
     restart: unless-stopped
     init: true   # node as PID 1 ignores SIGTERM: without init every stop waits for the kill timeout
     ports:
@@ -31,13 +32,12 @@ services:
         condition: service_completed_successfully
   ui:
     image: {{kit.registry}}/{{kit.name}}-ui:${UI_TAG:-latest}
-    container_name: {{kit.name}}-ui
     restart: unless-stopped
     init: true
     ports:
       - "${UI_PORT:-{{kit.uiPort}}}:3000"
     environment:
-      API_URL: http://{{kit.name}}-api:3000   # over the compose network, no host port involved
+      API_URL: http://api:3000   # the `api` service over the compose network, no host port involved
     depends_on:
       api:
         condition: service_healthy

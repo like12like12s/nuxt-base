@@ -11,6 +11,76 @@ const NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/
 const DBS = ['sqlite', 'mysql']
 const PLACEHOLDER = { registry: 'registry.example.com', host: 'deploy-host', domain: 'example.com', user: 'deploy' }
 
+// --context values end up in generated source, YAML, Markdown and in docker/deploy.conf, which a bash script sources.
+// They are data typed by a person or passed on by another program, so every one is checked before anything is
+// rendered: free text may not contain a line break or another control character (a title is rendered into `//` and `#`
+// comment lines), and everything that names a machine or a location has a closed alphabet — no quotes, spaces, `$`,
+// backticks, `;` or parentheses, so the value cannot become code wherever it is pasted.
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/
+const HOSTLIKE = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]*[A-Za-z0-9])?$/
+const REGISTRY = /^[A-Za-z0-9](?:[A-Za-z0-9._:/-]*[A-Za-z0-9])?$/
+const LAYER_REF = /^[A-Za-z0-9@._~/:#+-]+$/
+const URL_CHARS = /^https?:\/\/[A-Za-z0-9._~:/?#[\]%+=,-]+$/
+
+// Returns the context to use plus warnings. `new` is strict: a bad value is a usage error (exit 2) and nothing is
+// written. Re-composing an existing project (`lenient`: check / update / add read the answers back from
+// .scaffold.json) never fails on a stored answer: the value is left out — the default or placeholder is used instead,
+// so it still cannot reach a rendered file — and reported as a warning. An empty or absent value is always valid.
+function validateContext(input, lenient = false) {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    if (!lenient) throw usageError('--context must be a JSON object')
+    return { context: {}, warnings: ['answers: not an object — defaults are used'] }
+  }
+  const context = { ...input }
+  const warnings = []
+  const bad = (target, prop, key, message) => {
+    if (!lenient) throw usageError(`--context ${message}`)
+    delete target[prop]
+    warnings.push(`answers.${message} — ignored, the default is used; correct ${key} in .scaffold.json`)
+  }
+  const shown = (value) => JSON.stringify(String(value).slice(0, 40))
+  const empty = (value) => value === undefined || value === null || value === ''
+  const text = (target, prop, key, max) => {
+    const value = target[prop]
+    if (empty(value)) return
+    if (typeof value !== 'string') return bad(target, prop, key, `${key} must be a string`)
+    if (value.length > max) return bad(target, prop, key, `${key} must be at most ${max} characters`)
+    if (CONTROL.test(value)) return bad(target, prop, key, `${key} must be a single line without control characters`)
+  }
+  const token = (target, prop, key, pattern, what) => {
+    const value = target[prop]
+    if (empty(value)) return
+    if (typeof value !== 'string') return bad(target, prop, key, `${key} must be a string`)
+    if (value.length > 255 || !pattern.test(value)) return bad(target, prop, key, `${key} ${shown(value)} is not ${what}`)
+  }
+  const url = (target, prop, key) => {
+    const value = target[prop]
+    if (empty(value)) return
+    if (typeof value !== 'string') return bad(target, prop, key, `${key} must be a string`)
+    let parsed = null
+    try {
+      parsed = new URL(value)
+    } catch {
+      /* reported below */
+    }
+    if (!parsed || !['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || value.length > 500 || !URL_CHARS.test(value)) {
+      return bad(target, prop, key, `${key} ${shown(value)} is not a plain http(s) URL (no credentials, no spaces or shell characters)`)
+    }
+  }
+  text(context, 'title', 'title', 120)
+  text(context, 'description', 'description', 500)
+  token(context, 'layerRef', 'layerRef', LAYER_REF, 'a layer reference (github:owner/repo#tag, a package name or a path without spaces)')
+  if (context.deploy !== undefined && context.deploy !== null && (typeof context.deploy !== 'object' || Array.isArray(context.deploy))) bad(context, 'deploy', 'deploy', 'deploy must be an object')
+  const deploy = { ...context.deploy }
+  token(deploy, 'registry', 'deploy.registry', REGISTRY, 'a registry (host[:port][/path])')
+  for (const key of ['host', 'domain', 'user']) token(deploy, key, `deploy.${key}`, HOSTLIKE, 'a host or account name (letters, digits, . _ : -)')
+  context.deploy = deploy
+  token(context, 'mysqlHost', 'mysqlHost', HOSTLIKE, 'a host name (letters, digits, . _ : -)')
+  url(context, 'otlpEndpoint', 'otlpEndpoint')
+  url(context, 'authentikUrl', 'authentikUrl')
+  return { context, warnings }
+}
+
 const titleCase = (name) => name.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ')
 const csv = (list) => (list.length ? list.join(', ') : 'none')
 
@@ -79,7 +149,7 @@ export function resolveSelection(kit, input) {
     if (!preset.kinds.includes(kind.name)) throw incompatible('incompatible_preset', `deploy preset "${preset.name}" does not support kind "${kind.name}" (supports: ${preset.kinds.join(', ')})`)
   }
 
-  const context = input.context ?? {}
+  const { context, warnings } = validateContext(input.context ?? {}, input.lenient === true)
   const hasUi = kind.parts.some((p) => p.type === 'ui')
   const ports = resolvePorts(kind, input.port, input.apiPort)
   const deployCtx = {}
@@ -92,12 +162,14 @@ export function resolveSelection(kit, input) {
     db,
     preset,
     ports,
-    layerRef: hasUi ? context.layerRef ?? kit.layerRef : null,
+    warnings,
+    layerRef: hasUi ? context.layerRef || kit.layerRef : null,
     // Everything needed to re-compose this exact project later (check / update read it back from .scaffold.json).
     answers: {
       name,
-      title: context.title ?? titleCase(name),
-      description: context.description ?? `${titleCase(name)} — scaffolded with the nuxt-base kit`,
+      // Empty counts as not given (a wrapper may pass "" when its own flag was left out).
+      title: context.title || titleCase(name),
+      description: context.description || `${titleCase(name)} — scaffolded with the nuxt-base kit`,
       port: ports.ui,
       apiPort: ports.api,
       deploy: deployCtx,
@@ -304,6 +376,7 @@ export function compose(kit, input) {
     services,
     env,
     backup,
+    warnings: sel.warnings,
     next: ['npm install', 'npm run gate', 'git init && git add -A && git commit -m "scaffold"', ...next.map((n) => render(n, baseVars, 'next'))],
   }
 }
@@ -314,6 +387,7 @@ export function composeFromManifest(kit, manifest) {
   const kind = kit.kinds.get(manifest.kind)
   const both = kind && kind.parts.length > 1
   return compose(kit, {
+    lenient: true, // a stored answer never fails check / update / add — see validateContext
     name: a.name,
     kind: manifest.kind,
     with: (manifest.modules ?? []).filter((m) => m !== 'base'),

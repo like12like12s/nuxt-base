@@ -11,7 +11,8 @@
       },
       "files": [{ "from": "files", "to": "" }],
       "locked": [{ "from": "runtime/project/gate-ci.mjs", "to": "scripts/gate-ci.mjs" }],
-      "gitignore": ["node_modules/", ".env", "*.log"]
+      "gitignore": ["node_modules/", ".env", "*.log"],
+      "next": ["keep this repository private: .scaffold.json, docker/ and the env examples record deployment details (hosts, registry, domain) — see README.md"]
     }
   }
 }

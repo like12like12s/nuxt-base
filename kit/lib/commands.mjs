@@ -93,9 +93,9 @@ function diff(kit, dir) {
 
 export function cmdCheck(kit, opts) {
   const dir = resolve(opts.dir ?? '.')
-  const { manifest, drift, layer } = diff(kit, dir)
+  const { manifest, plan, drift, layer } = diff(kit, dir)
   const clean = drift.length === 0 && !layer?.behind
-  return { exit: clean ? EXIT.OK : EXIT.DRIFT, result: { ok: true, dir, clean, kit: { project: manifest.kit ?? null, current: kit.version }, layer, drift } }
+  return { exit: clean ? EXIT.OK : EXIT.DRIFT, result: { ok: true, dir, clean, kit: { project: manifest.kit ?? null, current: kit.version }, layer, drift, warnings: plan.warnings } }
 }
 
 // Re-copy locked files from the current kit and bump the layer tag. App-owned files are never touched, nothing is deleted.
@@ -104,7 +104,7 @@ export function cmdUpdate(kit, opts) {
   const { manifest, plan, drift, layer, fromConfig } = diff(kit, dir)
   const updated = []
   const orphaned = []
-  const warnings = []
+  const warnings = [...plan.warnings]
   for (const { path, reason } of drift) {
     if (reason === 'removed-from-kit') { orphaned.push(path); continue }
     writeFileUnder(dir, path, plan.files.find((f) => f.path === path).content)

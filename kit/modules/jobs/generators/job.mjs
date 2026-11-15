@@ -9,7 +9,7 @@ export default function generate({ name, manifest, parts }) {
   const apiDir = parts.api?.dir || ''
   const container = manifest.deploy === 'container'
   const command = container
-    ? `docker exec ${project}-api node dist/jobs/run.js ${n.kebab}`
+    ? `cd /srv/${project} && docker compose exec -T api node dist/jobs/run.js ${n.kebab}`
     : `cd <project dir>${apiDir ? `/${apiDir}` : ''} && node --env-file-if-exists=.env dist/jobs/run.js ${n.kebab}`
 
   const job = `// Job \`${n.kebab}\`. Run it: \`npm run job -- ${n.kebab}\` · built: \`node dist/jobs/run.js ${n.kebab}\`.
@@ -123,7 +123,7 @@ fill in the placeholders, then let the scheduler pick it up:
   default) so the job reports its own timeout (exit 4) instead of being killed from outside.
 - Exit codes: \`0\` ok · \`1\` failed · \`2\` unknown job · \`3\` the previous run is still going (the schedule is tighter than
   the run time — widen it) · \`4\` timed out. Anything but 0 is a failure for the scheduler.
-- The job needs the app's environment (\`DATABASE_URL\`, \`JOB_LOCK_DIR\`)${container ? ' — inside the running api container it has it already' : ' — the command loads `.env` of the api directory'}.
+- The job needs the app's environment (\`DATABASE_URL\`, \`JOB_LOCK_DIR\`)${container ? ' — inside the running api container it has it already (`/srv/<app>` = the directory of the compose file on the deploy host; a second stage has its own)' : ' — the command loads `.env` of the api directory'}.
 - Try it by hand first: \`${command}\` and check the two JSON lines (\`job start\`, \`job end\`).
 - Removing the job: disable the entry in the scheduler first, then delete the code.
 `

@@ -108,6 +108,7 @@ function text(result) {
     lines.push(result.clean ? `clean (kit ${result.kit.current})` : `drift (kit ${result.kit.current}):`)
     for (const d of result.drift) lines.push(`  ${d.reason}  ${d.path}`)
     if (result.layer?.behind) lines.push(`  layer-behind  ${result.layer.current} -> ${result.layer.latest}`)
+    for (const w of result.warnings ?? []) lines.push(`  warning: ${w}`)
   } else if (result.updated) {
     lines.push(`updated ${result.updated.length} locked file(s)${result.layer ? `, layer ${result.layer.from} -> ${result.layer.to}` : ''}`)
     for (const p of result.updated) lines.push(`  ${p}`)
