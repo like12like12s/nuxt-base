@@ -304,6 +304,9 @@ security  `createApi({ middleware: security({…}) })`: secure headers (nosniff,
 og        per-URL title / description / og:* / twitter:* / canonical for crawlers: the SPA shell's <head> is rewritten
           in the server's HTML renderer (Nitro `render:html`), the same code on Node and on Cloudflare Pages. The
           app owns server/og.ts (URL -> meta, may be async, abandoned after 3 s, an error never breaks the page).
+          og:url / canonical / site-relative images come from NUXT_PUBLIC_SITE_URL only — the request's Host and
+          X-Forwarded-Host are never believed (without the setting those tags are left out), and the path cannot
+          select another host. Unlisted URLs get the site preview, never a title derived from the path.
 jobs      src/jobs/<name>.ts + `npm run job -- <name>` / `node dist/jobs/run.js <name>`: a lock per job (no
           overlap, atomic across processes and hosts sharing JOB_LOCK_DIR; a dead owner or a passed deadline frees it), exit 0 ok · 1 failed · 2 unknown · 3 already running ·
           4 timed out, one JSON line at start and end, audit actor `job:<name>` and no audit row without a change.

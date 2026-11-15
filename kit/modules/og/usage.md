@@ -6,8 +6,12 @@
 - What each URL says: `server/og.ts` (`resolveOg`). Return `{ title, description?, image?, url? }` or `null` to leave
   the shell alone. It may be async — ask the API for the record a URL is about; it is abandoned after 3 s, and an error
   never breaks the page (the crawler gets the generic shell).
-- `NUXT_PUBLIC_SITE_URL` pins the public origin for `og:url` / `og:image`; without it the request's host (and
-  `x-forwarded-proto` / `x-forwarded-host`) is used.
+- **Set `NUXT_PUBLIC_SITE_URL`** (the public origin, `https://app.example.com`) on every deployed instance: it is the
+  only origin used in `og:url`, canonical and a site-relative `og:image`. The request's `Host` /
+  `X-Forwarded-Host` are client-controlled and are never believed (only `nuxt dev` uses `Host`); without the
+  setting those three tags are left out and the preview has just its title and description.
+- Only URLs that `resolveOg` knows get a title of their own; every other URL gets the site's preview. Do not derive a
+  title from the path — whoever shares a link chooses it.
 - It runs in the server's HTML renderer, so it is the same on the Node server (container, pm2) and on Cloudflare
   Pages (the Pages worker).
 - Check a URL: `curl -A 'facebookexternalhit/1.1' https://<site>/<path> | grep og:` · tests: `tests/unit/og.spec.ts`

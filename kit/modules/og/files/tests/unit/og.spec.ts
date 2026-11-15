@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyOg, isBot, ogTags } from '../../server/kit/og'
+import { applyOg, isBot, ogTags, resolveRequest } from '../../server/kit/og'
 import { DESCRIPTION, SITE, resolveOg } from '../../server/og'
 
 const request = (href: string) => {
@@ -12,9 +12,10 @@ describe('link previews', () => {
     expect(await resolveOg(request('/'))).toMatchObject({ title: SITE, description: DESCRIPTION })
   })
 
-  it('other pages get a title of their own', async () => {
-    const meta = await resolveOg(request('/order-history/2026'))
-    expect(meta?.title).toBe(`Order History / 2026 · ${SITE}`)
+  it('a URL nobody listed gets the site preview — its path never becomes a title', async () => {
+    const meta = await resolveOg(request('/your-account-is-suspended/click-here'))
+    expect(meta).toMatchObject({ title: SITE, description: DESCRIPTION })
+    expect(JSON.stringify(meta)).not.toMatch(/suspended/i)
   })
 
   it('the tags a crawler reads carry the page URL, escaped values, and replace the generic ones', async () => {
@@ -23,6 +24,20 @@ describe('link previews', () => {
     expect(html).not.toContain('Generic')
     expect(html).toContain('<meta property="og:url" content="https://app.example.com/order-history/2026">')
     expect(ogTags({ title: 'A <b> & "c"' }, page.url)).toContain('<title>A &lt;b&gt; &amp; &quot;c&quot;</title>')
+  })
+
+  it('og:url and canonical only ever name the configured site', () => {
+    const event = (path: string, headers: Record<string, string> = {}) => ({ path, headers: new Headers({ host: 'evil.example', 'x-forwarded-host': 'evil.example', ...headers }) })
+    for (const path of ['//evil.example/x', '/\\evil.example/x', 'https://evil.example/x']) {
+      const { url, trusted } = resolveRequest(event(path), { siteUrl: 'https://app.example.com' })
+      expect(trusted).toBe(true)
+      expect(ogTags({ title: 't', image: '/og.png' }, url), path).not.toContain('evil.example/x"')
+      expect(url.origin, path).toBe('https://app.example.com')
+    }
+    // no site URL configured: nothing is built from the request's host
+    const unknown = resolveRequest(event('/p'))
+    expect(unknown.trusted).toBe(false)
+    expect(ogTags({ title: 't', image: '/og.png' }, unknown.url, unknown.trusted)).not.toMatch(/og:url|canonical|og:image|evil/)
   })
 
   it('crawlers are recognised, browsers are not', () => {

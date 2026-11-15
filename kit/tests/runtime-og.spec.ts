@@ -1,7 +1,7 @@
 // @vitest-environment node
 // The locked link-preview runtime (kit/runtime/og/og.ts) at the source, including the Nitro hook driven by hand.
 import { describe, expect, it, vi } from 'vitest'
-import { applyOg, escapeHtml, isBot, ogPlugin, ogTags, requestUrl, stripOgTags, type OgResolver } from '../runtime/og/og'
+import { applyOg, escapeHtml, isBot, ogPlugin, ogTags, requestUrl, resolveRequest, stripOgTags, type OgResolver } from '../runtime/og/og'
 
 const url = (href: string) => new URL(href, 'https://app.example.com')
 
@@ -82,14 +82,50 @@ describe('applyOg', () => {
   })
 })
 
-describe('requestUrl', () => {
-  it('uses the proxy headers, then the host header; a fixed site URL wins', () => {
-    const event = (headers: Record<string, string>, path = '/a?b=1') => ({ path, headers: new Headers(headers) })
-    expect(requestUrl(event({ host: 'internal:3000', 'x-forwarded-host': 'app.example.com', 'x-forwarded-proto': 'https' })).href).toBe('https://app.example.com/a?b=1')
-    expect(requestUrl(event({ host: 'localhost:3000' })).href).toBe('http://localhost:3000/a?b=1')
-    expect(requestUrl(event({ host: 'evil.example' }), 'https://app.example.com').href).toBe('https://app.example.com/a?b=1')
-    expect(requestUrl({ node: { req: { url: '/x', headers: { host: 'h.example' } } } }).href).toBe('http://h.example/x')
-    expect(requestUrl(event({ host: 'bad host name' })).origin).toBe('http://localhost')
+// M5 (review t1097): og:url / canonical / og:image could be pointed at another site — through the path (`//host/x`
+// resolved against the site URL) and, without a site URL, through the client-controlled Host / X-Forwarded-Host.
+describe('the origin of the page', () => {
+  const event = (headers: Record<string, string>, path = '/a?b=1') => ({ path, headers: new Headers(headers) })
+  const SITE = 'https://app.example.com'
+
+  it.each(['//evil.example/x', '///evil.example/x', '/\\evil.example/x', '\\\\evil.example/x', 'https://evil.example/x', 'HTTP://evil.example:8080/x?y=1', '//evil.example'])('with a site URL the path cannot select another host: %s', (path) => {
+    const { url, trusted } = resolveRequest(event({ host: 'evil.example', 'x-forwarded-host': 'evil.example' }, path), { siteUrl: SITE })
+    expect(trusted).toBe(true)
+    expect(url.origin).toBe(SITE)
+    const tags = ogTags({ title: 't', image: '/og.png' }, url, trusted)
+    expect(tags).toContain(`<meta property="og:image" content="${SITE}/og.png">`)
+    expect(/og:url" content="([^"]+)"/.exec(tags)![1]!.startsWith(`${SITE}/`)).toBe(true)
+    expect(/canonical" href="([^"]+)"/.exec(tags)![1]!.startsWith(`${SITE}/`)).toBe(true)
+  })
+
+  it('an ordinary path and query survive unchanged', () => {
+    expect(resolveRequest(event({}), { siteUrl: SITE }).url.href).toBe(`${SITE}/a?b=1`)
+    expect(resolveRequest(event({}, '/items/42'), { siteUrl: `${SITE}/` }).url.href).toBe(`${SITE}/items/42`)
+    expect(resolveRequest({ node: { req: { url: '/x' } } }, { siteUrl: SITE }).url.href).toBe(`${SITE}/x`)
+  })
+
+  it('without a site URL the origin is unknown: Host and X-Forwarded-Host are not believed, and no URL-bearing tag is written', () => {
+    const spoofed = resolveRequest(event({ host: 'evil.example', 'x-forwarded-host': 'evil2.example', 'x-forwarded-proto': 'https' }))
+    expect(spoofed.trusted).toBe(false)
+    expect(spoofed.url.href).not.toContain('evil')
+    expect(spoofed.url.pathname + spoofed.url.search).toBe('/a?b=1') // the resolver still gets the path
+    const tags = ogTags({ title: 'T', description: 'D', image: '/og.png', url: '/a' }, spoofed.url, spoofed.trusted)
+    expect(tags).toContain('<title>T</title>')
+    expect(tags).toContain('<meta property="og:description" content="D">')
+    expect(tags).not.toMatch(/og:url|canonical|og:image|twitter:image|localhost|evil/)
+    // an absolute image the resolver itself chose is kept
+    expect(ogTags({ title: 'T', image: 'https://cdn.example.net/a.png' }, spoofed.url, false)).toContain('content="https://cdn.example.net/a.png"')
+    // a site URL that is not http(s) is no site URL
+    expect(resolveRequest(event({}), { siteUrl: 'javascript:alert(1)' }).trusted).toBe(false)
+  })
+
+  it('trustHost (development): the Host header is used — never X-Forwarded-Host', () => {
+    const dev = resolveRequest(event({ host: 'localhost:3000', 'x-forwarded-host': 'evil.example' }), { trustHost: true })
+    expect(dev).toMatchObject({ trusted: true })
+    expect(dev.url.href).toBe('http://localhost:3000/a?b=1')
+    expect(resolveRequest(event({ host: 'bad host name' }), { trustHost: true }).trusted).toBe(false)
+    expect(requestUrl(event({ host: 'h.example' }, '//evil.example/x')).origin).toBe('http://h.example')
+    expect(requestUrl(event({ host: 'evil.example' }), SITE).href).toBe(`${SITE}/a?b=1`)
   })
 })
 
@@ -98,11 +134,12 @@ describe('the render hook', () => {
   function plugin(resolve: OgResolver, options = {}) {
     let hook: Hook | undefined
     const onError = vi.fn()
-    ogPlugin(resolve, { onError, ...options })({ hooks: { hook: (_name, fn) => { hook = fn } } })
-    const render = async (path: string, ua: string | undefined) => {
+    ogPlugin(resolve, { onError, siteUrl: 'https://app.example.com', ...options })({ hooks: { hook: (_name, fn) => { hook = fn } } })
+    const render = async (path: string, ua: string | undefined, extra: Record<string, string> = {}, existingVary?: string | string[]) => {
       const html = { head: ['<title>Generic</title>'] }
       const vary: string[] = []
-      await hook!(html, { event: { path, headers: new Headers({ host: 'app.example.com', 'x-forwarded-proto': 'https', ...(ua ? { 'user-agent': ua } : {}) }), node: { res: { setHeader: (_n: string, v: string) => vary.push(v) } } } })
+      const res = { setHeader: (_n: string, v: string) => vary.push(v), getHeader: () => existingVary }
+      await hook!(html, { event: { path, headers: new Headers({ host: 'app.example.com', 'x-forwarded-proto': 'https', ...extra, ...(ua ? { 'user-agent': ua } : {}) }), node: { res } } })
       return { head: html.head.join('\n'), vary }
     }
     return { render, onError }
@@ -129,6 +166,31 @@ describe('the render hook', () => {
     expect(throwing.onError).toHaveBeenCalledTimes(1)
     const hanging = plugin(() => new Promise(() => undefined), { timeoutMs: 20 })
     expect((await hanging.render('/a', 'Twitterbot/1.0')).head).toBe('<title>Generic</title>')
+  })
+
+  it('M5: a spoofed X-Forwarded-Host or a //host path never reaches the tags; without a site URL no URL is claimed', async () => {
+    const pinned = plugin(() => ({ title: 'T', image: '/og.png' }))
+    for (const [path, headers] of [['/a', { 'x-forwarded-host': 'evil.example', host: 'evil.example' }], ['//evil.example/x', {}]] as [string, Record<string, string>][]) {
+      const { head } = await pinned.render(path, 'Twitterbot/1.0', headers)
+      expect(head, path).toContain('<meta property="og:image" content="https://app.example.com/og.png">')
+      expect(head.replace(/https:\/\/app\.example\.com\/+evil\.example\/x/g, ''), path).not.toContain('evil.example')
+    }
+    const unpinned = plugin(() => ({ title: 'T', image: '/og.png' }), { siteUrl: undefined })
+    const { head } = await unpinned.render('/a', 'Twitterbot/1.0', { 'x-forwarded-host': 'evil.example', host: 'evil.example' })
+    expect(head).toContain('<title>T</title>')
+    expect(head).not.toMatch(/evil|og:url|canonical|og:image/)
+    let seen: boolean | undefined
+    await plugin(({ originTrusted }) => { seen = originTrusted; return null }, { siteUrl: undefined }).render('/a', 'Twitterbot/1.0')
+    expect(seen).toBe(false)
+  })
+
+  // L16: setHeader('vary', …) replaced what a compression or CORS layer had already put there
+  it('adds User-Agent to an existing Vary header instead of replacing it', async () => {
+    const { render } = plugin(resolver)
+    expect((await render('/a', 'Mozilla/5.0', {}, 'Accept-Encoding')).vary).toEqual(['Accept-Encoding, User-Agent'])
+    expect((await render('/a', 'Mozilla/5.0', {}, ['Origin', 'Accept-Encoding'])).vary).toEqual(['Origin, Accept-Encoding, User-Agent'])
+    expect((await render('/a', 'Mozilla/5.0', {}, 'accept-encoding, user-agent')).vary).toEqual([]) // already there
+    expect((await render('/a', 'Mozilla/5.0', {}, '*')).vary).toEqual([])
   })
 
   it('`always` rewrites for everyone', async () => {

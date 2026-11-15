@@ -7,12 +7,13 @@
   "contributes": {
     "ui": {
       "env": [
-        { "key": "NUXT_PUBLIC_SITE_URL", "required": false, "secret": false, "example": "", "description": "Public origin of the site (https://app.example.com) used in og:url / og:image; empty = taken from the request" }
+        { "key": "NUXT_PUBLIC_SITE_URL", "required": false, "secret": false, "example": "", "description": "Public origin of the site (https://app.example.com) used in og:url / canonical / og:image. Set it on every deployed instance: empty = those tags are left out (the request host is never believed)" }
       ],
       "files": [{ "from": "files", "to": "" }],
       "locked": [{ "from": "runtime/og/og.ts", "to": "server/kit/og.ts" }],
       "nuxtConfig": ["runtimeConfig: { public: { siteUrl: '' } },"],
-      "usage": "usage.md"
+      "usage": "usage.md",
+      "next": ["set NUXT_PUBLIC_SITE_URL on every deployed instance — without it link previews carry no og:url / canonical / site-relative image"]
     }
   }
 }
