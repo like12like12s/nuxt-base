@@ -40,7 +40,7 @@ the exit code (without `--json`: the message on stderr).
 
 ```
 new     { ok, dir, name, title, description, kind, modules[], db, deploy, sample, lang, kitVersion, files[], locked[],
-          services[{ id, name, type: "web"|"api", port, healthPath, internal? }], env[{ key, required, secret }],
+          services[{ id, name, type: "web"|"api", port, healthPath, internal? }], env[{ key, required, secret, generated? }],
           backup[{ id, service, engine: "sqlite"|"mysql", envKey, path? | database? }], next[] }
           (+ "dryRun": true with --dry-run — same plan, nothing written)
 add     { ok, dir, type, name, generator, files[], patched[], next[] }
@@ -78,6 +78,12 @@ list    { ok, kitVersion, layerRef, kinds[{ name, description, parts[{ type, dir
   so `port` is its development port only: do not register a health probe or a route against it on the deploy host.
 - Ports: one-part kinds use `--port` (default 3000). `fullstack`: `--port N` alone = API on N, UI on N+1 (port
   pairing); with `--api-port`, `--port` is the UI port.
+- `env[].generated: true` (only present when true; module.json: `"generated": true` on a secret env key): a secret
+  nobody chooses — a deploy tool generates a random value on the host. With the `container` preset
+  `docker/env.example` names those keys in ONE comment line, `# kit:generated KEY [KEY ...]`, and leaves `KEY=`
+  empty; the line is absent when the project has none. Today: `AUTH_PROXY_SECRET` (module `auth`). The deploy
+  details a tool needs stay where they are: `answers.deploy.{host,user,domain}` and `answers.port` in
+  `.scaffold.json`, and `docker/env.example`.
 - `backup` is what a backup job has to cover (empty without the `db` module): `path` = the SQLite file relative to
   the project, `database` = the MySQL schema, `envKey` = where the real location is configured. The generator
   registers nothing — the wrapper does.
@@ -208,7 +214,7 @@ Rules that keep the output deterministic — **same inputs, byte-identical outpu
 - Templates may use `{{kit.<var>}}` only (Vue's own `{{ }}` is untouched). An unknown variable is an error. Variables:
   `name title description titleJson descriptionJson kind lang kitVersion layerRef modules db deploy port uiPort apiPort
   e2ePort apiDir uiDir dir registry deployHost deployDomain deployUser mysqlHost dbName databaseUrlExample rateLimitDefault
-  services nuxtConfig
+  services nuxtConfig generatedEnvLine
   usageSections`. Use the `*Json` forms inside source code — they are quoted and escaped.
 - No clock, no randomness, no environment lookups in a template or in `lib/compose.mjs`.
 - Conditional blocks: a line that is only a comment `@kit:if <terms>` / `@kit:else` / `@kit:end` (`//`, `#` or

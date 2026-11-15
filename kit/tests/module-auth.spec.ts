@@ -69,7 +69,7 @@ describe('auth module', () => {
     })
 
     it('env: the proxy secret is a secret, nothing is required, dev mode is off by default', () => {
-      expect(r.json.env).toContainEqual({ key: 'AUTH_PROXY_SECRET', required: false, secret: true })
+      expect(r.json.env).toContainEqual({ key: 'AUTH_PROXY_SECRET', required: false, secret: true, generated: true })
       for (const key of ['AUTH_TRUSTED_PROXIES', 'AUTH_ROLE_MAP', 'AUTH_DEV_MODE']) expect(r.json.env).toContainEqual({ key, required: false, secret: false })
       expect(read(dir, '.env.example')).toMatch(/\nAUTH_DEV_MODE=\n/)
       expect(read(dir, 'src/config.ts')).toContain("SECRETS: readonly (keyof typeof shape)[] = ['DATABASE_URL', 'AUTH_PROXY_SECRET']")
@@ -79,6 +79,26 @@ describe('auth module', () => {
       const usage = read(dir, '.memory/docs/guides/usage.md')
       for (const text of ['## Auth', 'What the operator sets up', 'https://authentik.example.com', 'x-auth-proxy-secret', 'AUTH_TRUSTED_PROXIES', 'npm run auth:token -- create', 'must answer 401']) expect(usage, text).toContain(text)
     })
+  })
+
+  // Contract with the deploy tooling: secrets that are generated on the host are named in one line of docker/env.example.
+  it('docker/env.example names the generated secrets in one `# kit:generated` line and leaves them empty', () => {
+    for (const kind of ['api', 'fullstack']) {
+      const { dir, r } = scaffold(['--kind', kind, '--with', 'auth,notify', '--deploy', 'container'])
+      const env = read(dir, 'docker/env.example')
+      expect(env.match(/^# kit:generated .*$/gm), kind).toEqual(['# kit:generated AUTH_PROXY_SECRET'])
+      expect(env).toMatch(/^AUTH_PROXY_SECRET=$/m)
+      expect(r.json.env.filter((e: any) => e.generated)).toEqual([{ key: 'AUTH_PROXY_SECRET', required: false, secret: true, generated: true }])
+      // a secret someone else issues (a token of another service) is not generated
+      expect(r.json.env.find((e: any) => e.key === 'NOTIFIER_TOKEN')).toEqual({ key: 'NOTIFIER_TOKEN', required: false, secret: true })
+      // what deploy tooling reads stays where it is
+      expect(JSON.parse(read(dir, '.scaffold.json')).answers).toMatchObject({ port: expect.any(Number), deploy: expect.any(Object) })
+    }
+    for (const args of [['--kind', 'api', '--with', 'api,db'], ['--kind', 'fullstack'], ['--kind', 'nuxt-app']]) {
+      const { dir, r } = scaffold([...args, '--deploy', 'container'])
+      expect(read(dir, 'docker/env.example'), args.join(' ')).not.toContain('kit:generated')
+      expect(r.json.env.some((e: any) => 'generated' in e)).toBe(false)
+    }
   })
 
   it('--context authentikUrl lands in the docs and survives check', () => {

@@ -306,6 +306,12 @@ export function compose(kit, input) {
       sel.db === 'mysql'
         ? `mysql://<user>:<password>@${sel.answers.mysqlHost ?? 'db.example.com'}:3306/${sel.name.replaceAll('-', '_')}`
         : `sqlite:./data/${sel.name}.db`,
+    // Secrets nobody chooses: random values a deploy tool generates on the host. docker/env.example names them in one
+    // `# kit:generated KEY [KEY ...]` line and leaves `KEY=` empty; the line is absent when there is none.
+    generatedEnvLine: (() => {
+      const keys = [...new Set([...accs.values()].flatMap((a) => [...a.env.values()].filter((e) => e.secret && e.generated).map((e) => e.key)))].sort()
+      return keys.length ? `# kit:generated ${keys.join(' ')}\n` : ''
+    })(),
     services: services.map((s) => `- ${s.name} (\`${s.id}\`, ${s.type}) — port ${s.port}${s.internal ? ' (development; deployed: no host port, compose-internal)' : ''}, health \`${s.healthPath}\``).join('\n'),
     nuxtConfig: '',
     usageSections: '',
@@ -368,7 +374,7 @@ export function compose(kit, input) {
   for (const a of accs.values()) for (const e of a.env.values()) {
     if (seen.has(e.key)) continue
     seen.add(e.key)
-    env.push({ key: e.key, required: !!e.required, secret: !!e.secret })
+    env.push({ key: e.key, required: !!e.required, secret: !!e.secret, ...(e.secret && e.generated ? { generated: true } : {}) })
   }
 
   // What a backup job has to cover — the wrapper registers it, the generator registers nothing.
