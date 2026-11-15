@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { compose, composeFromManifest } from './compose.mjs'
 import { EXIT, existsError, incompatible, usageError } from './errors.mjs'
 import { inside, isEmptyOrMissing, pathExists, readJson, sha256, symlinkUnder, toJson, writeFileUnder } from './fsutil.mjs'
-import { GENERATOR_TYPES, isBehind } from './kit.mjs'
+import { GENERATOR_TYPES, LAYER_REPO, isBehind } from './kit.mjs'
 
 const MANIFEST = '.scaffold.json'
 const NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/
@@ -18,6 +18,18 @@ function readManifest(dir) {
   } catch (e) {
     throw usageError(`${file} is not valid JSON: ${e.message}`, 'bad_manifest')
   }
+}
+
+const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const LAYER_TAG = new RegExp(`${escapeRe(LAYER_REPO)}#v\\d+\\.\\d+\\.\\d+`, 'g')
+
+// The layer tag(s) the UI's nuxt.config.ts extends, oldest first; null when the file or a tag ref is not there
+// (a local path, an env variable) — then only the manifest can say.
+function layerRefInConfig(file) {
+  if (!existsSync(file)) return null
+  const refs = [...new Set(readFileSync(file, 'utf8').match(LAYER_TAG) ?? [])]
+  if (!refs.length) return null
+  return refs.sort((a, b) => (isBehind(a, b) ? -1 : isBehind(b, a) ? 1 : 0))[0]
 }
 
 export function cmdNew(kit, opts) {
@@ -65,9 +77,18 @@ function diff(kit, dir) {
     else if (sha256(readFileSync(abs)) !== recorded[path]) drift.push({ path, reason: 'modified' })
     else if (recorded[path] !== plan.locked[path]) drift.push({ path, reason: 'outdated' })
   }
-  const hasUi = plan.parts.some((p) => p.type === 'ui')
-  const layer = hasUi ? { current: manifest.layerRef ?? null, latest: kit.layerRef, behind: isBehind(manifest.layerRef, kit.layerRef) } : null
-  return { manifest, plan, drift, layer }
+  const ui = plan.parts.find((p) => p.type === 'ui')
+  let layer = null
+  let fromConfig = false
+  if (ui) {
+    // The ref the build really uses is the one in nuxt.config.ts — .scaffold.json only remembers what was generated.
+    // A hand-edited older tag must read as drift, so the config wins whenever it names a tag of the layer.
+    const inConfig = layerRefInConfig(join(dir, ui.dir, 'nuxt.config.ts'))
+    const current = inConfig ?? manifest.layerRef ?? null
+    layer = { current, latest: kit.layerRef, behind: isBehind(current, kit.layerRef) }
+    fromConfig = inConfig !== null
+  }
+  return { manifest, plan, drift, layer, fromConfig }
 }
 
 export function cmdCheck(kit, opts) {
@@ -80,7 +101,7 @@ export function cmdCheck(kit, opts) {
 // Re-copy locked files from the current kit and bump the layer tag. App-owned files are never touched, nothing is deleted.
 export function cmdUpdate(kit, opts) {
   const dir = resolve(opts.dir ?? '.')
-  const { manifest, plan, drift, layer } = diff(kit, dir)
+  const { manifest, plan, drift, layer, fromConfig } = diff(kit, dir)
   const updated = []
   const orphaned = []
   const warnings = []
@@ -94,7 +115,7 @@ export function cmdUpdate(kit, opts) {
     const ui = plan.parts.find((p) => p.type === 'ui')
     const config = join(dir, ui.dir, 'nuxt.config.ts')
     const text = existsSync(config) ? readFileSync(config, 'utf8') : null
-    if (text?.includes(layer.current)) {
+    if (layer.current && text?.includes(layer.current)) {
       writeFileSync(config, text.split(layer.current).join(layer.latest))
       layerChange = { from: layer.current, to: layer.latest, file: posix.join(ui.dir, 'nuxt.config.ts') }
     } else {
@@ -102,7 +123,9 @@ export function cmdUpdate(kit, opts) {
     }
   }
   const next = { ...manifest, kit: kit.version, locked: plan.locked }
+  // Keep the manifest equal to what nuxt.config.ts really extends (a hand-edited tag is recorded, not papered over).
   if (layerChange) next.layerRef = layer.latest
+  else if (fromConfig && !layer.behind) next.layerRef = layer.current
   const text = toJson(next)
   if (text !== readFileSync(join(dir, MANIFEST), 'utf8')) writeFileSync(join(dir, MANIFEST), text)
   return { exit: EXIT.OK, result: { ok: true, dir, kit: { from: manifest.kit ?? null, to: kit.version }, updated, orphaned, layer: layerChange, warnings } }
@@ -122,7 +145,7 @@ export function cmdList(kit) {
         status: m.status,
         implicit: m.name === 'base',
         kinds: m.kinds,
-        requires: m.requires ?? [],
+        requires: (m.requires ?? []).map((r) => (typeof r === 'string' ? r : r.name)),
         generators: Object.keys(m.generators ?? {}),
         description: brief(m),
       })),
@@ -156,9 +179,50 @@ export async function cmdAdd(kit, opts) {
   if (!part) throw incompatible('no_generator', `the "${type}" generator needs a "${partType}" part, which kind ${plan.kind} does not have`)
 
   const mod = await import(pathToFileURL(join(found.unit.dir, found.spec.module)).href)
-  const out = await mod.default({ name, type, dir: join(dir, part.dir), part, manifest, project: dir })
-  const files = (out.files ?? []).map((f) => ({ path: posix.join(part.dir, f.path), content: f.content }))
+  // A file or a patch may name another part (`part: 'ui' | 'api' | 'project'`): a resource is an API thing with an
+  // optional page in the UI. A part the project does not have is skipped — the generator need not know the kind.
+  const dirOf = (partName) => {
+    if (partName === undefined) return part.dir
+    if (partName === 'project') return ''
+    return plan.parts.find((p) => p.type === partName)?.dir
+  }
+  const parts = Object.fromEntries(plan.parts.map((p) => [p.type, { type: p.type, dir: p.dir, abs: join(dir, p.dir) }]))
+  const out = await mod.default({ name, type, dir: join(dir, part.dir), part, parts, manifest, project: dir })
+  const located = (list, what) => (list ?? []).flatMap((entry) => {
+    const base = dirOf(entry.part)
+    if (base === undefined) return []
+    if (typeof entry.path !== 'string' || !entry.path) throw new Error(`generator ${found.unit.name}/${type}: a ${what} without a path`)
+    return [{ ...entry, path: posix.join(base, entry.path) }]
+  })
+  const files = located(out.files, 'file')
+  const patches = located(out.patches, 'patch')
   for (const f of files) if (pathExists(inside(dir, f.path))) throw existsError(`add ${type} ${name}: ${f.path} already exists`, 'exists')
+
+  // Patches insert lines into app-owned files at an anchor comment (`// kit:anchor <name>`) the scaffold left there.
+  // Everything is computed first: a missing anchor stops the command before a single byte is written.
+  const patched = new Map()
+  for (const p of patches) {
+    const abs = inside(dir, p.path)
+    if (!patched.has(p.path)) {
+      if (!existsSync(abs)) throw usageError(`add ${type} ${name}: ${p.path} is missing — it is where the ${p.anchor} anchor lives`, 'anchor_missing')
+      patched.set(p.path, readFileSync(abs, 'utf8'))
+    }
+    const lines = patched.get(p.path).split('\n')
+    const at = lines.findIndex((line) => new RegExp(`(//|#|<!--)\\s*kit:anchor ${escapeRe(p.anchor)}(\\s|$)`).test(line))
+    if (at === -1) {
+      throw usageError(`add ${type} ${name}: no \`kit:anchor ${p.anchor}\` comment in ${p.path} — restore the anchor, or add this by hand above where it was:\n${p.insert}`, 'anchor_missing')
+    }
+    const indent = /^\s*/.exec(lines[at])[0]
+    const insert = p.insert.replace(/\n$/, '').split('\n').map((line) => (line ? indent + line : line))
+    if (insert.every((line) => lines.includes(line))) continue // already there: adding twice changes nothing
+    lines.splice(at, 0, ...insert)
+    patched.set(p.path, lines.join('\n'))
+  }
+
   for (const f of files) writeFileUnder(dir, f.path, f.content)
-  return { exit: EXIT.OK, result: { ok: true, dir, type, name, generator: found.unit.name, files: files.map((f) => f.path), next: out.next ?? [] } }
+  for (const [path, content] of patched) writeFileUnder(dir, path, content)
+  return {
+    exit: EXIT.OK,
+    result: { ok: true, dir, type, name, generator: found.unit.name, files: files.map((f) => f.path), patched: [...patched.keys()], next: out.next ?? [] },
+  }
 }

@@ -171,3 +171,38 @@ describe('update', () => {
     expect(cli(['check', dir, '--json'], { kit }).status).toBe(1) // still behind — not papered over
   })
 })
+
+describe('layer tag: nuxt.config.ts is what counts (t1088)', () => {
+  const ref = (v: string) => `github:like12like12s/nuxt-base#v${v}`
+
+  it('a tag edited by hand to an older one is drift although .scaffold.json still says the new one', () => {
+    const kit = cloneKit('1.2.0')
+    for (const [kind, config] of [['nuxt-app', 'nuxt.config.ts'], ['fullstack', 'ui/nuxt.config.ts']] as const) {
+      const dir = project(['--kind', kind], kit)
+      expect(cli(['check', dir, '--json'], { kit }).status, kind).toBe(0)
+      writeFileSync(join(dir, config), read(dir, config).replace(ref('1.2.0'), ref('1.1.0')))
+      expect(JSON.parse(read(dir, '.scaffold.json')).layerRef).toBe(ref('1.2.0'))
+      const r = cli(['check', dir, '--json'], { kit })
+      expect(r.status, kind).toBe(1)
+      expect(r.json).toMatchObject({ clean: false, drift: [], layer: { current: ref('1.1.0'), latest: ref('1.2.0'), behind: true } })
+
+      const u = cli(['update', dir, '--json'], { kit })
+      expect(u.json.layer).toEqual({ from: ref('1.1.0'), to: ref('1.2.0'), file: config })
+      expect(read(dir, config)).toContain(`extends: ['${ref('1.2.0')}']`)
+      expect(cli(['check', dir, '--json'], { kit }).status, kind).toBe(0)
+    }
+  })
+
+  it('a stale manifest does not hide it either way: config ahead of the manifest is clean, and update records it', () => {
+    const kit = cloneKit('1.0.0')
+    const dir = project(['--kind', 'nuxt-app'], kit)
+    setKitVersion(kit, '1.1.0')
+    // bumped by hand in nuxt.config.ts only
+    writeFileSync(join(dir, 'nuxt.config.ts'), read(dir, 'nuxt.config.ts').replace(ref('1.0.0'), ref('1.1.0')))
+    const r = cli(['check', dir, '--json'], { kit })
+    expect(r.json.layer).toEqual({ current: ref('1.1.0'), latest: ref('1.1.0'), behind: false })
+    expect(r.status).toBe(0)
+    cli(['update', dir, '--json'], { kit })
+    expect(JSON.parse(read(dir, '.scaffold.json')).layerRef).toBe(ref('1.1.0'))
+  })
+})

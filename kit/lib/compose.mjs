@@ -23,7 +23,12 @@ function resolveModules(kit, kind, requested) {
     if (!mod.kinds.includes(kind.name)) throw incompatible('incompatible_module', `module "${name}" does not support kind "${kind.name}" (supports: ${mod.kinds.join(', ')})`)
     if (names.has(name) && name !== 'base') return
     names.add(name)
-    for (const dep of mod.requires ?? []) add(dep, name)
+    // A requirement is a module name, or { name, kinds } when it only applies to some kinds (auth needs the data
+    // layer in an API, and nothing but the layer's useAuth in a UI-only project).
+    for (const dep of mod.requires ?? []) {
+      if (typeof dep === 'string') add(dep, name)
+      else if (!dep.kinds || dep.kinds.includes(kind.name)) add(dep.name, name)
+    }
   }
   add('base')
   for (const name of requested) add(name)
@@ -98,6 +103,8 @@ export function resolveSelection(kit, input) {
       deploy: deployCtx,
       // Only recorded when given, so projects without it keep the same .scaffold.json.
       ...(context.mysqlHost ? { mysqlHost: String(context.mysqlHost) } : {}),
+      ...(context.otlpEndpoint ? { otlpEndpoint: String(context.otlpEndpoint) } : {}),
+      ...(context.authentikUrl ? { authentikUrl: String(context.authentikUrl) } : {}),
     },
   }
 }
@@ -128,6 +135,8 @@ export function compose(kit, input) {
   if (preset) applications.push({ unit: preset })
 
   const when = { kind: kind.name, modules: sel.modules, db: sel.db }
+  // What `@kit:if` blocks in templates can ask (lib/render.mjs).
+  const flags = new Set([...sel.modules, `kind:${kind.name}`, ...(sel.db ? [`db:${sel.db}`] : []), ...(preset ? [`deploy:${preset.name}`] : [])])
   for (const { unit, only } of applications) {
     if (!unit) throw new Error(`kit is inconsistent: a unit referenced by kind "${kind.name}" is missing`)
     for (const [target, c] of Object.entries(unit.contributes ?? {})) {
@@ -176,6 +185,9 @@ export function compose(kit, input) {
     deployDomain: deploy.domain,
     deployUser: deploy.user,
     mysqlHost: sel.answers.mysqlHost ?? 'db.example.com',
+    // Empty = tracing stays off until the operator sets it. Never a host of ours: it arrives through --context.
+    otlpEndpoint: sel.answers.otlpEndpoint ?? '',
+    authentikUrl: sel.answers.authentikUrl ?? 'https://authentik.example.com',
     dbName: sel.name.replaceAll('-', '_'),
     // Placeholders, never a credential: the real URL lives in .env only.
     databaseUrlExample:
@@ -196,7 +208,7 @@ export function compose(kit, input) {
     }
   }
   baseVars.usageSections = usage
-    .map(({ file, dir }) => render(readFileSync(file, 'utf8'), varsFor(acc(dir)), file).trim())
+    .map(({ file, dir }) => render(readFileSync(file, 'utf8'), varsFor(acc(dir)), file, flags).trim())
     .join('\n\n')
 
   const files = new Map() // project-relative path -> { content, locked }
@@ -214,7 +226,7 @@ export function compose(kit, input) {
       if (!src.startsWith(kit.root + sep)) throw new Error(`${f.unit.name}: file source escapes the kit: ${f.from}`)
       if (!existsSync(src)) throw new Error(`${f.unit.name}: missing file source ${f.from}`)
       const entries = statSync(src).isDirectory() ? walk(src).map((rel) => [join(src, rel), posix.join(f.to ?? '', rel)]) : [[src, f.to]]
-      for (const [abs, to] of entries) put(at(undot(to)), render(readFileSync(abs, 'utf8'), vars, abs))
+      for (const [abs, to] of entries) put(at(undot(to)), render(readFileSync(abs, 'utf8'), vars, abs, flags))
     }
     for (const f of a.locked) {
       // Locked files are copied byte for byte (never rendered) so their hash equals the kit's — that is what `check` compares.
@@ -309,6 +321,6 @@ export function composeFromManifest(kit, manifest) {
     deploy: manifest.deploy ?? undefined,
     port: a.port,
     apiPort: both ? a.apiPort : undefined,
-    context: { title: a.title, description: a.description, layerRef: manifest.layerRef ?? undefined, deploy: a.deploy, mysqlHost: a.mysqlHost },
+    context: { title: a.title, description: a.description, layerRef: manifest.layerRef ?? undefined, deploy: a.deploy, mysqlHost: a.mysqlHost, otlpEndpoint: a.otlpEndpoint, authentikUrl: a.authentikUrl },
   })
 }

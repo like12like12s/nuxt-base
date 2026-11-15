@@ -101,4 +101,47 @@ describe('add — generator dispatch', () => {
     expect(() => read(dir, 'docs/thing.md')).toThrow() // all or nothing
     expect(() => read(dir, '../escape.md')).toThrow()
   })
+
+  it('patches insert at a `kit:anchor` comment, keep its indent, and may target another part', () => {
+    const kit = kitWithGenerators()
+    writeFileSync(join(kit, 'modules/gen-test/generators/job.mjs'), `export default ({ name }) => ({
+      files: [{ path: 'src/jobs/' + name + '.ts', content: 'x\\n' }, { part: 'ui', path: 'app/pages/' + name + '.vue', content: '<template />\\n' }, { part: 'project', path: 'docs/' + name + '.md', content: 'doc\\n' }],
+      patches: [
+        { path: 'src/app.ts', anchor: 'routes', insert: "register('" + name + "')\\n" },
+        { path: 'src/app.ts', anchor: 'imports', insert: "import './jobs/" + name + ".js'" },
+      ],
+    })\n`)
+    const dir = project('fullstack', kit, ['--with', 'gen-test'])
+    writeFileSync(join(dir, 'api/src/app.ts'), "// kit:anchor imports\nfunction boot() {\n  // kit:anchor routes — keep this line\n}\n")
+    const r = cli(['add', 'job', 'sync', '--dir', dir, '--json'], { kit })
+    expect(r.status).toBe(0)
+    expect(r.json.files).toEqual(['api/src/jobs/sync.ts', 'ui/app/pages/sync.vue', 'docs/sync.md'])
+    expect(r.json.patched).toEqual(['api/src/app.ts'])
+    expect(read(dir, 'api/src/app.ts')).toBe("import './jobs/sync.js'\n// kit:anchor imports\nfunction boot() {\n  register('sync')\n  // kit:anchor routes — keep this line\n}\n")
+
+    // a second job lands above the anchor too, below the first
+    cli(['add', 'job', 'other', '--dir', dir, '--json'], { kit })
+    expect(read(dir, 'api/src/app.ts')).toContain("  register('sync')\n  register('other')\n  // kit:anchor routes")
+
+    // in a project without a ui part the ui file is skipped
+    const apiOnly = project('api', kit, ['--with', 'gen-test'])
+    writeFileSync(join(apiOnly, 'src/app.ts'), '// kit:anchor imports\n// kit:anchor routes\n')
+    expect(cli(['add', 'job', 'sync', '--dir', apiOnly, '--json'], { kit }).json.files).toEqual(['src/jobs/sync.ts', 'docs/sync.md'])
+  })
+
+  it('a missing anchor stops everything (exit 2) and says what to add by hand', () => {
+    const kit = kitWithGenerators()
+    writeFileSync(join(kit, 'modules/gen-test/generators/job.mjs'), `export default ({ name }) => ({
+      files: [{ path: 'src/jobs/' + name + '.ts', content: 'x\\n' }],
+      patches: [{ path: 'src/app.ts', anchor: 'routes', insert: "register('" + name + "')" }],
+    })\n`)
+    const dir = project('api', kit, ['--with', 'gen-test'])
+    const before = read(dir, 'src/app.ts')
+    const r = cli(['add', 'job', 'sync', '--dir', dir, '--json'], { kit })
+    expect(r.status).toBe(2)
+    expect(r.json.code).toBe('anchor_missing')
+    expect(r.json.message).toContain("register('sync')")
+    expect(read(dir, 'src/app.ts')).toBe(before)
+    expect(() => read(dir, 'src/jobs/sync.ts')).toThrow() // all or nothing
+  })
 })

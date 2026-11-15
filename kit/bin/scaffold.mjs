@@ -118,7 +118,8 @@ function text(result) {
     for (const m of result.modules) lines.push(`module ${m.name.padEnd(10)} ${m.status.padEnd(8)} kinds: ${m.kinds.join(', ')}${m.requires.length ? `  requires: ${m.requires.join(', ')}` : ''}`)
     for (const p of result.deploy) lines.push(`deploy ${p.name.padEnd(10)} kinds: ${p.kinds.join(', ')}`)
   } else if (result.type) {
-    lines.push(`added ${result.type} ${result.name}:`, ...result.files.map((f) => `  ${f}`))
+    lines.push(`added ${result.type} ${result.name}:`, ...result.files.map((f) => `  ${f}`), ...(result.patched ?? []).map((f) => `  ${f} (edited)`))
+    if (result.next?.length) lines.push('next:', ...result.next.map((n) => `  ${n}`))
   }
   return lines.join('\n')
 }
