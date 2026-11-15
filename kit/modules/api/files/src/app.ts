@@ -16,6 +16,12 @@ import { createApi, mountV1 } from './kit/api/app.js'
 import { createLogger, type Logger } from './kit/api/log.js'
 import { databaseChecks } from './kit/db/checks.js'
 import type { Migrations } from './kit/db/migrate.js'
+// @kit:if security
+import { parseOrigins, security } from './kit/security/security.js'
+// @kit:end
+// @kit:if trace
+import { traceMiddleware } from './kit/trace/tracing.js'
+// @kit:end
 import { registerItems } from './resources/items/items.routes.js'
 // @kit:if auth
 import { registerMe } from './resources/me/me.routes.js'
@@ -44,6 +50,18 @@ export function createApp(config: Config, deps: AppDeps) {
     logger,
     checks: databaseChecks(deps.database, deps.migrations ?? shippedMigrations),
     build: { commit: config.APP_COMMIT, builtAt: config.APP_BUILT_AT },
+    // @kit:if security
+    // In front of every route: secure headers, CORS allowlist, rate limit, body size limit.
+    middleware: security({
+      corsOrigins: parseOrigins(config.CORS_ORIGINS),
+      rateLimit: config.RATE_LIMIT_MAX > 0 ? { max: config.RATE_LIMIT_MAX, windowMs: config.RATE_LIMIT_WINDOW_MS } : null,
+      bodyLimitBytes: config.BODY_LIMIT_BYTES,
+    }),
+    // @kit:end
+    // @kit:if trace
+    // Around everything: the request's trace id is the id of this span (a no-op while tracing is off).
+    before: [traceMiddleware()],
+    // @kit:end
   })
 
   // @kit:if auth

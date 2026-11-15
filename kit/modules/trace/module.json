@@ -1,10 +1,33 @@
 {
   "name": "trace",
-  "status": "planned",
-  "description": "OpenTelemetry (OTLP) + JSON logs carrying the traceId",
-  "kinds": [
-    "api",
-    "fullstack"
-  ],
-  "requires": []
+  "status": "ready",
+  "description": "OpenTelemetry for the API: one server span per request sent over OTLP, off until an endpoint is set; the span's trace id is the x-trace-id header, the traceId of every log line and of the audit row",
+  "kinds": ["api", "fullstack"],
+  "requires": ["api"],
+  "contributes": {
+    "api": {
+      "package": {
+        "dependencies": {
+          "@opentelemetry/api": "^1.10.0",
+          "@opentelemetry/context-async-hooks": "^3.1.1",
+          "@opentelemetry/core": "^3.1.1",
+          "@opentelemetry/exporter-trace-otlp-http": "^0.301.2",
+          "@opentelemetry/resources": "^3.1.1",
+          "@opentelemetry/sdk-trace": "^3.1.1"
+        }
+      },
+      "env": [
+        { "key": "OTEL_EXPORTER_OTLP_ENDPOINT", "required": false, "secret": false, "example": "{{kit.otlpEndpoint}}", "description": "OTLP/HTTP collector, e.g. http://127.0.0.1:4318 — empty = tracing off (no exporter, no network)" },
+        { "key": "OTEL_SERVICE_NAME", "required": false, "secret": false, "example": "{{kit.name}}-api", "description": "service.name of the spans" },
+        { "key": "OTEL_TRACES_SAMPLER_ARG", "required": false, "secret": false, "example": "1", "description": "Share of new traces kept, 0..1 (a sampled caller is always kept)" },
+        { "key": "OTEL_SDK_DISABLED", "required": false, "secret": false, "example": "", "description": "true = tracing off even with an endpoint" }
+      ],
+      "files": [{ "from": "files", "to": "" }],
+      "locked": [
+        { "from": "runtime/trace/tracing.ts", "to": "src/kit/trace/tracing.ts" },
+        { "from": "runtime/testing/otlp-collector.ts", "to": "src/kit/testing/otlp-collector.ts" }
+      ],
+      "usage": "usage.md"
+    }
+  }
 }

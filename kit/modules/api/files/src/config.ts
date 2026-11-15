@@ -19,6 +19,12 @@ const shape = {
   ...database,
   APP_COMMIT: z.string().optional(),
   APP_BUILT_AT: z.string().optional(),
+  // @kit:if security
+  CORS_ORIGINS: z.string().optional(),
+  RATE_LIMIT_MAX: z.coerce.number().int().min(0).default(300),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60_000),
+  BODY_LIMIT_BYTES: z.coerce.number().int().min(1).default(1_048_576),
+  // @kit:end
   // @kit:if auth
   // Forward-auth headers are believed only with one of these two (see usage.md, "Auth"). Neither = service tokens only.
   AUTH_PROXY_SECRET: z.string().min(16).optional(),
