@@ -26,7 +26,8 @@ npm run db:check                # exit 0 only when database == code (what /healt
     replayed: the write may or may not be there — read it back before doing it again.
 - Backup before migrate: SQLite — a verified snapshot in `data/backups/` (automatic; a backup that fails or does
   not verify stops the migration, exit 3). MySQL — set `DB_BACKUP_CMD` to your dump
-  command; without it `db:migrate` refuses (exit 3) unless you pass `--no-backup` / `DB_MIGRATE_NO_BACKUP=1` because
+  command (run through the shell exactly as written: it is trusted operator configuration, set it only where the
+  deploy's other secrets are set, never from anything a user can influence); without it `db:migrate` refuses (exit 3) unless you pass `--no-backup` / `DB_MIGRATE_NO_BACKUP=1` because
   the backup was taken another way. Register the database with your backup job (`scaffold new --json` lists it under
   `backup`).
 - In a built image: `node dist/db/cli.js check|migrate up|seed|predeploy`.

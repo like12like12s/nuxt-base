@@ -22,6 +22,12 @@ import { appliedMigrations, backupSqlite, describeSchema, migrateDown, migrateUp
 // DB_BACKUP_CMD is a command line the OPERATOR configures (`mysqldump … | gzip > …`): a shell is what it is written
 // for, so one is started explicitly and given the line as a single argument (no shell option on the spawn call), and nothing from a
 // request ever reaches this (the value comes from the process environment at deploy time only).
+/**
+ * Runs `commandLine` through the system shell and returns its exit code.
+ * TRUSTED INPUT ONLY: the line is executed as written — pipes, redirects, substitutions and all. Its one caller
+ * passes DB_BACKUP_CMD from the process environment, i.e. operator configuration with the same authority as the
+ * deploy itself. Never pass a value that a request, a database row or any other user-influenced source contributed to.
+ */
 export function runShellCommand(commandLine: string): number {
   const [shell, flag] = process.platform === 'win32' ? [process.env.ComSpec ?? 'cmd.exe', '/c'] : ['/bin/sh', '-c']
   return spawnSync(shell, [flag, commandLine], { stdio: 'inherit' }).status ?? 1
