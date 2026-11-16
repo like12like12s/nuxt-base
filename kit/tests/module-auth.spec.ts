@@ -132,7 +132,7 @@ describe('auth module', () => {
       expect(read(dir, 'ui/server/kit/auth-bridge.ts')).toBe(readFileSync(join(KIT_ROOT, 'runtime/auth/bridge.ts'), 'utf8'))
       const route = read(dir, 'ui/server/routes/api/[...path].ts')
       expect(route).toContain("import { authBridgeFromEnv } from '../../kit/auth-bridge'")
-      expect(route.indexOf('bridge(event.node.req.headers, event.node.req.socket.remoteAddress)')).toBeGreaterThan(-1)
+      expect(route.indexOf('bridge(event.node.req.headers, event.node.req.socket.remoteAddress, event.node.req.rawHeaders)')).toBeGreaterThan(-1)
       expect(route.indexOf('bridge(event.node.req.headers')).toBeLessThan(route.indexOf('return proxyRequest('))
       expect(route).not.toMatch(/@kit:/)
       expect(r.json.files).toContain('ui/tests/unit/auth-bridge.spec.ts')

@@ -12,6 +12,9 @@
 // applies itself (src/kit/auth/proxy.ts): a trusted peer, never a header a client can type. Both settings are needed;
 // with either missing nothing is ever passed on (fail closed) and the API sees an anonymous request, or the caller's
 // own `Authorization: Bearer` service token, which is never touched.
+// One identity per request: when the trusted proxy's request carries an identity header twice (pass `rawHeaders` to
+// see that), or a user name / uid / email with a comma in it (what a repeated header is joined into), nothing is
+// passed on and no secret is added — the API answers 401 instead of reading `alice, bob` as one subject.
 // Self-contained (node:net only): it is copied into the UI server as is.
 import { BlockList, isIP } from 'node:net'
 
@@ -29,6 +32,10 @@ export class AuthBridgeConfigError extends Error {
   }
 }
 
+// Headers that mean something else on every request (the same list as the API's src/kit/auth/proxy.ts): naming one
+// as an identity header would forward whatever any client sent in it as "who this is".
+export const NEVER_IDENTITY: ReadonlySet<string> = new Set(['authorization', 'cookie', 'host', 'user-agent', 'referer', 'origin', 'x-forwarded-for', 'x-forwarded-host', 'x-real-ip', 'forwarded', 'traceparent', 'content-type'])
+
 export interface AuthBridgeOptions {
   /** Addresses / CIDR ranges of the forward-auth proxy as THIS server sees the TCP peer. Empty = never pass on. */
   trustedProxies?: readonly string[]
@@ -38,13 +45,19 @@ export interface AuthBridgeOptions {
   preset?: string
   /** Single header names that differ from the preset (AUTH_HEADER_USERNAME, …). */
   names?: Partial<Record<'username' | 'uid' | 'email' | 'name' | 'groups', string>>
+  /** Told when a request from the trusted proxy is not vouched for because its identity is ambiguous (header name only). */
+  onAmbiguous?: (header: string) => void
 }
 
 export type RequestHeaders = Record<string, string | string[] | undefined>
 
 export interface AuthBridge {
-  /** Rewrites `headers` (lower-case keys, as Node gives them) in place. Returns whether the request was vouched for. */
-  (headers: RequestHeaders, peer: string | undefined): boolean
+  /**
+   * Rewrites `headers` (lower-case keys, as Node gives them) in place. Returns whether the request was vouched for.
+   * `rawHeaders` (Node's `req.rawHeaders`: name, value, name, value …) lets it see an identity header that was sent
+   * twice — Node joins those into one value before anyone else can tell.
+   */
+  (headers: RequestHeaders, peer: string | undefined, rawHeaders?: readonly string[]): boolean
   /** How it is set up — for the boot log, never a secret. */
   describe(): { active: boolean; trustedProxies: number; secret: boolean; headers: string[] }
 }
@@ -82,7 +95,7 @@ export function createAuthBridge(options: AuthBridgeOptions = {}): AuthBridge {
   for (const [part, given] of Object.entries(options.names ?? {})) {
     const name = given?.trim().toLowerCase()
     if (!name) continue
-    if (!HEADER_NAME.test(name) || name === PROXY_SECRET_HEADER) throw new AuthBridgeConfigError(`AUTH_HEADER_${part.toUpperCase()}: "${given}" cannot be used as an identity header`)
+    if (!HEADER_NAME.test(name) || NEVER_IDENTITY.has(name) || name === PROXY_SECRET_HEADER) throw new AuthBridgeConfigError(`AUTH_HEADER_${part.toUpperCase()}: "${given}" cannot be used as an identity header`)
     names[part] = name
   }
   const passOn = new Set(Object.values(names))
@@ -96,8 +109,32 @@ export function createAuthBridge(options: AuthBridgeOptions = {}): AuthBridge {
   const fromProxy = entries.length ? matcher(entries) : () => false
   const active = entries.length > 0 && secret.length > 0
 
-  const bridge = ((headers: RequestHeaders, peer: string | undefined): boolean => {
-    const trusted = active && fromProxy(peer)
+  // The parts that say WHO it is: one value each, and never a comma (a repeated header is joined with one).
+  const subjectParts = new Set([names.username, names.uid, names.email].filter((name): name is string => !!name))
+  const ambiguous = (headers: RequestHeaders, rawHeaders: readonly string[] | undefined): string | null => {
+    const seen = new Map<string, number>()
+    for (let i = 0; i < (rawHeaders?.length ?? 0); i += 2) {
+      const name = rawHeaders![i]!.toLowerCase()
+      if (passOn.has(name)) seen.set(name, (seen.get(name) ?? 0) + 1)
+    }
+    for (const [header, value] of Object.entries(headers)) {
+      const name = header.toLowerCase()
+      if (!passOn.has(name) || value === undefined) continue
+      if (Array.isArray(value) || (seen.get(name) ?? 0) > 1) return name
+      if (subjectParts.has(name) && value.includes(',')) return name
+    }
+    return null
+  }
+
+  const bridge = ((headers: RequestHeaders, peer: string | undefined, rawHeaders?: readonly string[]): boolean => {
+    let trusted = active && fromProxy(peer)
+    if (trusted) {
+      const header = ambiguous(headers, rawHeaders)
+      if (header) {
+        trusted = false // strip everything below, vouch for nothing
+        options.onAmbiguous?.(header)
+      }
+    }
     for (const header of Object.keys(headers)) {
       const name = header.toLowerCase()
       if (name === PROXY_SECRET_HEADER) delete headers[header]
@@ -118,6 +155,7 @@ export function createAuthBridge(options: AuthBridgeOptions = {}): AuthBridge {
  */
 export function authBridgeFromEnv(env: Record<string, string | undefined> = process.env, report: (message: string) => void = (message) => console.error(message)): AuthBridge {
   const options: AuthBridgeOptions = {
+    onAmbiguous: (header) => report(`auth bridge: the request from the forward-auth proxy carries ${header} more than once (or with a comma in it) — its identity is not passed on to the API`),
     trustedProxies: csv(env.AUTH_BRIDGE_TRUSTED_PROXIES),
     secret: env.AUTH_PROXY_SECRET,
     preset: env.AUTH_HEADER_PRESET,

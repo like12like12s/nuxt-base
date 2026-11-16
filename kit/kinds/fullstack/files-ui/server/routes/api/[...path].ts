@@ -12,7 +12,7 @@ import { apiTarget } from '../../utils/api-target'
 const bridge = authBridgeFromEnv()
 
 export default defineEventHandler((event) => {
-  bridge(event.node.req.headers, event.node.req.socket.remoteAddress)
+  bridge(event.node.req.headers, event.node.req.socket.remoteAddress, event.node.req.rawHeaders)
   return proxyRequest(event, apiTarget(process.env.API_URL, event.path))
 })
 // @kit:else

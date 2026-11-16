@@ -50,6 +50,15 @@ describe('auth bridge', () => {
     expect(other).not.toHaveProperty('remote-user')
   })
 
+  it('one identity per request: a repeated identity header, or a user name with a comma, is not passed on', () => {
+    const repeated: Record<string, string> = { 'x-authentik-username': 'alice, bob', accept: 'application/json' }
+    expect(bridge(repeated, PROXY, ['X-Authentik-Username', 'alice', 'X-Authentik-Username', 'bob', 'Accept', 'application/json'])).toBe(false)
+    expect(repeated).toEqual({ accept: 'application/json' })
+    const comma: Record<string, string> = { 'x-authentik-username': 'alice, bob' }
+    expect(bridge(comma, PROXY)).toBe(false)
+    expect(comma).toEqual({})
+  })
+
   it('needs BOTH settings: with one missing nothing is passed on (fail closed), and it says so', () => {
     for (const env of [{ AUTH_BRIDGE_TRUSTED_PROXIES: PROXY }, { AUTH_PROXY_SECRET: SECRET }, {}]) {
       const said: string[] = []

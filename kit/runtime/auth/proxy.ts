@@ -12,6 +12,10 @@
 //   secret           the proxy adds `x-auth-proxy-secret: <AUTH_PROXY_SECRET>` (and strips it from client requests)
 //   trustedProxies   the TCP peer is one of these addresses / CIDR ranges (AUTH_TRUSTED_PROXIES)
 // Whatever is configured must hold (both = both). Nothing configured = the headers are never believed (fail closed).
+//
+// One identity per request: a header that arrives twice is joined by HTTP into `alice, bob`. A user name, uid or
+// email with a comma in it is therefore refused (`ambiguous-identity`, the request stays anonymous = 401) — never
+// read as one subject. Display name and groups are free text and may contain commas.
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { BlockList, isIP } from 'node:net'
 
@@ -39,7 +43,7 @@ export const KNOWN_IDENTITY_HEADERS: readonly string[] = [...new Set(Object.valu
 const HEADER_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/
 // Headers that mean something else on every request: naming one of them as an identity header would let any client
 // (or any ordinary proxy) "sign in" by sending it.
-const NEVER_IDENTITY = new Set(['authorization', 'cookie', 'host', 'user-agent', 'referer', 'origin', 'x-forwarded-for', 'x-forwarded-host', 'x-real-ip', 'forwarded', 'traceparent', 'content-type'])
+export const NEVER_IDENTITY: ReadonlySet<string> = new Set(['authorization', 'cookie', 'host', 'user-agent', 'referer', 'origin', 'x-forwarded-for', 'x-forwarded-host', 'x-real-ip', 'forwarded', 'traceparent', 'content-type'])
 
 /**
  * The identity header names from configuration: a preset (AUTH_HEADER_PRESET, default `authentik`) with any single
@@ -121,7 +125,7 @@ export const csv = (value: string | undefined): string[] => (value ?? '').split(
 export type ProxyResult =
   | { kind: 'none' } // no identity headers on the request
   | { kind: 'trusted'; identity: ProxyIdentity }
-  | { kind: 'rejected'; reason: 'not-configured' | 'bad-secret' | 'untrusted-source' }
+  | { kind: 'rejected'; reason: 'not-configured' | 'bad-secret' | 'untrusted-source' | 'ambiguous-identity' }
 
 /** Build the check once (it validates the config); call it per request. */
 export function proxyAuth(trust: ProxyTrust) {
@@ -143,6 +147,8 @@ export function proxyAuth(trust: ProxyTrust) {
     const reason = refusal(header, remoteAddress)
     if (reason) return { kind: 'rejected', reason }
     const value = (name: string | undefined) => (name ? header(name)?.trim() || undefined : undefined)
+    // A repeated header reaches us joined with a comma: that is two answers to "who is this", not a subject.
+    if ([username, value(names.uid), value(names.email)].some((part) => part?.includes(','))) return { kind: 'rejected', reason: 'ambiguous-identity' }
     return {
       kind: 'trusted',
       identity: {

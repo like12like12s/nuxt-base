@@ -2,8 +2,8 @@
 // The auth bridge of a fullstack UI (kit/runtime/auth/bridge.ts), tested at the source — the same cases the generated
 // UI test runs, plus: it and the API's own check (runtime/auth/proxy.ts) agree on header names and on the trust rule.
 import { describe, expect, it } from 'vitest'
-import { PROXY_SECRET_HEADER, authBridgeFromEnv, createAuthBridge } from '../runtime/auth/bridge'
-import { KNOWN_IDENTITY_HEADERS } from '../runtime/auth/proxy'
+import { NEVER_IDENTITY as BRIDGE_NEVER_IDENTITY, PROXY_SECRET_HEADER, authBridgeFromEnv, createAuthBridge } from '../runtime/auth/bridge'
+import { KNOWN_IDENTITY_HEADERS, NEVER_IDENTITY } from '../runtime/auth/proxy'
 
 // The /api proxy of this UI is the only way a browser reaches the API. What it lets through decides who the API
 // believes: identity headers count only when the request came from the forward-auth proxy (its TCP peer), and then —
@@ -76,6 +76,50 @@ describe('auth bridge', () => {
     }
   })
 
+  // K-L5 (review 2): a second Remote-User from the trusted proxy reached the API as the subject "alice, bob".
+  it('an identity header that is repeated, or a user name / uid / email with a comma, is not vouched for: nothing is passed on', () => {
+    const remote = createAuthBridge({ trustedProxies: [PROXY], secret: SECRET, preset: 'remote' })
+    const said: string[] = []
+    const reporting = createAuthBridge({ trustedProxies: [PROXY], secret: SECRET, preset: 'remote', onAmbiguous: (header) => said.push(header) })
+    const cases: [Record<string, string | string[]>, string[] | undefined][] = [
+      // what Node hands over for a header sent twice: one joined value — and the raw list shows the repetition
+      [{ 'remote-user': 'alice, bob', accept: 'x' }, ['Remote-User', 'alice', 'Remote-User', 'bob', 'Accept', 'x']],
+      [{ 'remote-user': 'alice, bob', accept: 'x' }, undefined], // without rawHeaders the comma alone is enough
+      [{ 'remote-user': ['alice', 'bob'], accept: 'x' }, undefined],
+      [{ 'remote-user': 'alice', 'remote-email': 'a@example.com, b@example.com', accept: 'x' }, undefined],
+      // groups / display name may contain commas — but not arrive twice
+      [{ 'remote-user': 'alice', 'remote-groups': 'staff, app-admins', accept: 'x' }, ['remote-user', 'alice', 'remote-groups', 'staff', 'REMOTE-GROUPS', 'app-admins', 'accept', 'x']],
+    ]
+    for (const [headers, raw] of cases) {
+      const copy = structuredClone(headers)
+      expect(remote(copy, PROXY, raw), JSON.stringify(headers)).toBe(false)
+      expect(copy, JSON.stringify(headers)).toEqual({ accept: 'x' }) // no identity, no secret: the API sees an anonymous request
+    }
+    reporting({ 'remote-user': 'alice, bob' }, PROXY)
+    expect(said).toEqual(['remote-user'])
+    // the uid of the authentik preset is a subject part too
+    expect(bridge({ 'x-authentik-username': 'alice', 'x-authentik-uid': 'u1, u2' }, PROXY)).toBe(false)
+    // one of each is the normal case; commas in the display name and in a single groups header are fine
+    const ok: Record<string, string> = { 'remote-user': 'alice', 'remote-name': 'Doe, Alice', 'remote-groups': 'staff,app-admins' }
+    expect(remote(ok, PROXY, ['Remote-User', 'alice', 'Remote-Name', 'Doe, Alice', 'Remote-Groups', 'staff,app-admins'])).toBe(true)
+    expect(ok[PROXY_SECRET_HEADER]).toBe(SECRET)
+  })
+
+  // Info (review 2): the API refused these names, the bridge did not — it would have forwarded a client's own
+  // Authorization / Cookie value as "who this is".
+  it('a header that means something else on every request cannot be named as an identity header: the bridge stays off', () => {
+    for (const name of ['authorization', 'Cookie', 'x-forwarded-for', 'host', 'user-agent', 'traceparent']) {
+      expect(() => createAuthBridge({ trustedProxies: [PROXY], secret: SECRET, names: { username: name } }), name).toThrow(/cannot be used as an identity header/)
+      const said: string[] = []
+      const off = authBridgeFromEnv({ AUTH_BRIDGE_TRUSTED_PROXIES: PROXY, AUTH_PROXY_SECRET: SECRET, AUTH_HEADER_GROUPS: name }, (message) => said.push(message))
+      const headers: Record<string, string> = { ...identity(), [name.toLowerCase()]: 'app-admins' }
+      expect(off(headers, PROXY), name).toBe(false)
+      expect(headers).not.toHaveProperty('x-authentik-username')
+      expect(headers).not.toHaveProperty(PROXY_SECRET_HEADER)
+      expect(said.join('\n')).toMatch(/^auth bridge: off — AUTH_HEADER_GROUPS/)
+    }
+  })
+
   it('from the environment: both settings + the preset', () => {
     const on = authBridgeFromEnv({ AUTH_BRIDGE_TRUSTED_PROXIES: `${PROXY}, 198.51.100.0/24`, AUTH_PROXY_SECRET: SECRET, AUTH_HEADER_PRESET: 'remote' }, () => { throw new Error('nothing to report') })
     expect(on.describe()).toEqual({ active: true, trustedProxies: 2, secret: true, headers: ['remote-user', 'remote-email', 'remote-name', 'remote-groups'] })
@@ -92,6 +136,7 @@ describe('bridge + API: one trust rule end to end', async () => {
 
   it('both sides know the same presets and header names', () => {
     expect(BRIDGE_PRESETS).toEqual(HEADER_PRESETS)
+    expect([...BRIDGE_NEVER_IDENTITY].sort()).toEqual([...NEVER_IDENTITY].sort())
     expect([...KNOWN_IDENTITY_HEADERS].sort()).toEqual([...new Set(Object.values(BRIDGE_PRESETS).flatMap((set) => Object.values(set)))].sort())
   })
 
@@ -121,6 +166,23 @@ describe('bridge + API: one trust rule end to end', async () => {
     expect(comma(lookup({ 'remote-user': 'alice', 'remote-groups': 'a, b', [PROXY_SECRET_HEADER]: SECRET }), undefined)).toMatchObject({ identity: { groups: ['a', 'b'] } })
     // still fail closed with nothing configured, whatever the names
     expect(proxyAuth({ headers: identityHeaders({ preset: 'remote' }) })(lookup({ 'remote-user': 'mallory' }), '127.0.0.1')).toEqual({ kind: 'rejected', reason: 'not-configured' })
+  })
+
+  // K-L5: the API's own half — it sees a repeated header only as the joined value
+  it('the API refuses a user name, uid or email with a comma (a repeated header, joined) instead of reading it as one subject', () => {
+    const api = proxyAuth({ secret: SECRET, headers: identityHeaders({ preset: 'remote' }) })
+    const joined = new Headers({ [PROXY_SECRET_HEADER]: SECRET })
+    joined.append('remote-user', 'alice')
+    joined.append('remote-user', 'bob')
+    expect(joined.get('remote-user')).toBe('alice, bob')
+    expect(api((name) => joined.get(name) ?? undefined, undefined)).toEqual({ kind: 'rejected', reason: 'ambiguous-identity' })
+    expect(api(lookup({ 'remote-user': 'alice', 'remote-email': 'a@example.com,b@example.com', [PROXY_SECRET_HEADER]: SECRET }), undefined)).toEqual({ kind: 'rejected', reason: 'ambiguous-identity' })
+    const authentik = proxyAuth({ secret: SECRET })
+    expect(authentik(lookup({ 'x-authentik-username': 'alice', 'x-authentik-uid': 'u1, u2', [PROXY_SECRET_HEADER]: SECRET }), undefined)).toEqual({ kind: 'rejected', reason: 'ambiguous-identity' })
+    // not a way around the trust rule: without the secret it is the secret that is wrong
+    expect(api(lookup({ 'remote-user': 'alice, bob' }), undefined)).toEqual({ kind: 'rejected', reason: 'bad-secret' })
+    // a display name with a comma is one person
+    expect(api(lookup({ 'remote-user': 'alice', 'remote-name': 'Doe, Alice', [PROXY_SECRET_HEADER]: SECRET }), undefined)).toMatchObject({ kind: 'trusted', identity: { subject: 'alice', name: 'Doe, Alice' } })
   })
 
   it('identityHeaders: defaults stay X-Authentik-*, single names override, and what cannot be an identity header stops the boot', () => {

@@ -385,7 +385,8 @@ auth      identity from three sources, in this order: the fixed dev user (AUTH_D
           server/kit/auth-bridge.ts): identity and secret headers a client sent are ALWAYS removed, and only when the
           request's TCP peer is the configured forward-auth proxy (AUTH_BRIDGE_TRUSTED_PROXIES) are the proxy's
           identity headers passed on and the secret added — the same rule one hop earlier; with either setting
-          missing nothing is passed on.
+          missing nothing is passed on. One identity per request, on both hops: an identity header that is repeated
+          or a user name / uid / email with a comma is refused (401), never joined into one subject.
           Trusted users are upserted into `users` (written and audited on change only); roles are the app's own
           (src/auth/roles.ts), mapped from identity-provider groups by AUTH_ROLE_MAP.
           Every route declares who may call it — `publicRoute()` / `requireAuth()` / `requireRole(…)` as route

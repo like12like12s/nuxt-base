@@ -4,6 +4,7 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { createApi, mountV1 } from '../runtime/api/app'
+import { getContext } from '../runtime/api/context'
 import { createLogger } from '../runtime/api/log'
 import { runAuthCli } from '../runtime/auth/cli'
 import { createAuth, publicRoute, requireAuth, requireRole, routeRules, undeclaredRoutes, type AuthOptions } from '../runtime/auth/guard'
@@ -453,6 +454,16 @@ describe('who is believed', () => {
     }
     expect(t.lines.filter((l) => l.msg === 'forward-auth headers ignored').map((l) => [l.level, l.reason])).toEqual([['warn', 'bad-secret'], ['warn', 'bad-secret']])
     expect(await t.db.selectFrom('users').select('id').execute()).toEqual([]) // nobody was created
+  })
+
+  // K-L5 (review 2): over HTTP, with the real secret — the request stays anonymous and nobody is created
+  it('a repeated identity header (joined "alice, bob") from the trusted proxy is a 401, not a user called "alice, bob"', async () => {
+    const t = await setup()
+    const res = await testClient(t.app, { headers: authentik('alice', 'app-admins', { 'x-authentik-username': 'alice, bob', [PROXY_SECRET_HEADER]: SECRET }) }).delete('/api/v1/things/1')
+    expect(res.status).toBe(401)
+    expect(res.body.error.code).toBe('UNAUTHORIZED')
+    expect(t.lines.filter((l) => l.msg === 'forward-auth headers ignored').map((l) => [l.level, l.reason])).toEqual([['warn', 'ambiguous-identity']])
+    expect(await t.db.selectFrom('users').select('id').execute()).toEqual([])
   })
 
   it('without proxy config the headers are never believed; service tokens still work', async () => {

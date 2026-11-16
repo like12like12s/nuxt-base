@@ -43,7 +43,10 @@ authentik (default)   X-Authentik-Username   X-Authentik-Uid   X-Authentik-Email
 remote                Remote-User            (none)            Remote-Email        Remote-Name        Remote-Groups
 ```
 
-Without a uid header the user name is the stable subject. A single name that differs: `AUTH_HEADER_USERNAME`,
+Without a uid header the user name is the stable subject. One identity per request: a user name, uid or email that
+arrives twice — or with a comma in it, which is what a repeated header is joined into — is refused (the request is
+anonymous, 401, logged as `ambiguous-identity`), never read as one subject. A user name that itself contains a comma
+is therefore not supported; display name and groups may. A single name that differs: `AUTH_HEADER_USERNAME`,
 `AUTH_HEADER_UID`, `AUTH_HEADER_EMAIL`, `AUTH_HEADER_NAME`, `AUTH_HEADER_GROUPS`. Groups are separated by `|`
 (`AUTH_HEADER_GROUPS_SEPARATOR=,` for a proxy that sends a comma list). An unknown preset or an unusable name stops
 the boot.
@@ -56,6 +59,11 @@ The proxy talks to the UI server, and the UI server is the only caller of the AP
 under an identity header name or as `x-auth-proxy-secret`, and only when the request's TCP peer is the forward-auth
 proxy does it pass the proxy's identity headers on and add the secret the API checks. The proxy itself needs no
 special configuration beyond forward-auth with the header preset above.
+
+A request whose identity headers are ambiguous (sent twice, or a
+user name with a comma) gets neither identity nor secret. A header that means something else on every request
+(`Authorization`, `Cookie`, `X-Forwarded-For`, …) cannot be named as an identity header: the bridge then stays off
+and says so, as the API refuses to boot.
 
 ```
 AUTH_PROXY_SECRET             UI + API   the same value, >= 16 random characters (`openssl rand -base64 32`)
