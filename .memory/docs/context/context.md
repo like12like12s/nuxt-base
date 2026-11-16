@@ -1,16 +1,20 @@
 ---
 name: nuxt-base-context
-description: Current state of nuxt-base — the Nuxt 4 base layer all internal Nuxt apps extend
+description: Current state of nuxt-base — the Nuxt 4 base layer + the dev-kit (project generator) for internal apps
 ---
 # nuxt-base — Context
 
 ## Current State
 
-- Nuxt 4 **layer** (not an app): `extends: ['github:like12like12s/nuxt-base#vX.Y.Z']` + peer deps (@tailwindcss/vite, tailwindcss, lucide-vue-next) in the app · repo `like12like12s/nuxt-base` · path `~/projects/nuxt-base`
-- Contains: Tailwind 4 preset + `@theme` tokens (zinc dark), 24 core Vue components (moved from `~/.dev-mem/templates/components`, which is now a cmp-verified mirror) + LoadingState/EmptyState/ErrorState/AsyncState, `useSiteHead`/`useToast`/`useAuth`, `error.vue`, Nitro `GET /api/_me` (Authentik forward-auth headers)
-- Fixture app `playground/` (port 3517 dev, 3518 e2e) · tests: vitest (nuxt env) 11 + playwright e2e 4 + templates mirror check · `npm run gate` = typecheck + test
-- No running service — consumed at build time by other apps · created 2026-11-15 (t1086, dev-velocity pilot step 1 of t1085)
-- Repo is **public** (user decision 2026-11-15) — builds need no token; keep internal hosts/credentials out
-- Consumers: **drill/ui** (`#v0.1.3`, deployed 2026-11-15, first migrated app) · **ui-kit** (submodule `vendor/nuxt-base` → registry Vue column) · `~/.dev-mem/templates/components` (cmp mirror)
-- Tools: `scripts/sync-templates.sh [--check]` · `scripts/parity-shots.mjs shoot|diff` (migration proof)
-- Next: t1087 `ai scaffold` · t1088 drift job · t1089 migrate remaining apps · how-to in [usage](../guides/usage.md) · history in [changelog](../changelog/changelog.md)
+- Two things in one repo (`like12like12s/nuxt-base`, path `~/projects/nuxt-base`, **public** — keep internal hosts/credentials out), one version = package.json = git tag (now **v0.4.0**):
+  - Nuxt 4 **layer**: `extends: ['github:like12like12s/nuxt-base#vX.Y.Z']` + peer deps in the app — Tailwind 4 preset + zinc-dark tokens, 24 core Vue components + Loading/Empty/Error/AsyncState, `useSiteHead`/`useToast`/`useAuth`, `error.vue`
+  - **dev-kit** in `kit/` (epic t1092): zero-dep generator `kit/bin/scaffold.mjs` (`new | add | check | update | list`, `--json`) — kinds nuxt-app / api / fullstack; modules base, ci-github, api, db, auth, trace, og, testkit, security, jobs, notify; deploy presets cf-pages / container / pm2
+- Kit model: app-owned files are generated once; locked runtime files are copied from `kit/runtime/**` to the app's `src/kit/<area>/` with hashes in `.scaffold.json`; `check` = clean | drift | kit-unreleased; `update` re-copies locked files and prints the by-hand steps from `kit/UPGRADING.md`
+- Stack the kit generates: hono + zod-openapi (`/api/v1`, error shape with traceId, openapi.json contract test, typed client), Kysely (one migration set for SQLite and MySQL), forward-auth headers behind a trusted proxy + service tokens, OTel trace, generated gate = typecheck → oxlint → test
+- Normal entry point is `ai scaffold` (ai-cli) — it reads the kit from the newest release tag on origin (cache), adds infra context and registers the project; never from this working tree
+- Tests: `npm run gate` (typecheck + vitest + playwright e2e + templates mirror check) · `npm run gate:kit` scaffolds every combo into temp dirs (install, gate, build, docker images, throwaway MySQL) — after a release, run it again once the tag is on GitHub · CI on GitHub Actions
+- No running service of its own. Jobs in pulse: `kit-drift-weekly` (Mon), `kit-gate-weekly` (Thu)
+- Consumers: **kit-ref** (reference fullstack app, built only from the kit) · **drill/ui** (layer only) · **ui-kit** (submodule) · `~/.dev-mem/templates/components` (cmp mirror, `scripts/sync-templates.sh [--check]`)
+- Fixture app `playground/` (port 3517 dev, 3518 e2e) · `scripts/parity-shots.mjs shoot|diff` (migration proof)
+- Not built: `uploads` module · Next: t1089 migrate remaining Nuxt apps to the layer
+- How-to in [usage](../guides/usage.md) + `kit/README.md` · history in [changelog](../changelog/changelog.md)

@@ -4,6 +4,21 @@ description: Change history of nuxt-base (newest first)
 ---
 # nuxt-base — Changelog
 
+## 2026-11-16
+
+### v0.4.0 + t1123 — dev-kit fix4: second-review findings + upgrade-path gaps (epic t1092)
+- CI: spawn-heavy kit specs have explicit timeouts (v0.3.0 release run was red on a 5 s default)
+- db: a QUERY_TIMEOUT inside a transaction runs the unit once and reaches the caller (the failed ROLLBACK on the destroyed connection no longer replaces it / triggers replays); `addLiveUnique` / `dropLiveUnique` for an existing table, portable SQLite/MySQL
+- jobs: lock race tests pin the confirm step (stale lock at generation >= 1, churn round; mutation-proven); grace period on the injected clock; superseded/own lock files removed only while they hold the judged record
+- api: `CommitOutcomeUnknownError` -> 503 `COMMIT_OUTCOME_UNKNOWN` (new code in the Error schema)
+- auth: one identity per request on both hops (repeated header / comma in user name, uid, email = 401); bridge refuses reserved header names; a service-token role the app dropped is ignored
+- generator: `update` never downgrades (`kit_older`); `update --show <path>`; duplicate route params refused; `add resource --og` is opt-in
+- gate:ci scans history + (locally) uncommitted changes; kit gate probes port blocks before use
+- UPGRADING: 0.2.0 -> 0.3.0 complete without a fresh scaffold; new 0.3.0 -> next section
+- Tests: gate 574 unit + 4 e2e; gate:kit 21/21; CI green on 9247f60
+- Release v0.4.0 (tag): contract changes for wrappers — `add resource --og`, `update --show <path>`, exit 4 `kit_older`, exit 2 `duplicate_param`/`og_unavailable`, error code `COMMIT_OUTCOME_UNKNOWN`; by-hand steps in `kit/UPGRADING.md` "0.3.0 -> 0.4.0"
+- Second review (t1116): 0 Critical/High, 8 Medium, 21 Low — kit part fixed here; ai-cli part t1124, pilot/pulse part t1125
+
 ### v0.3.0 — kit after review + first real use (epic t1092)
 - Tag v0.3.0 = fix round 1 (t1106) + fix round 2 (t1112) · `kit/UPGRADING.md` section `0.2.0 -> 0.3.0` lists the by-hand steps; `scaffold update` prints them
 
@@ -21,8 +36,6 @@ description: Change history of nuxt-base (newest first)
 - L1–L16 all fixed (client `traceparent` trusted only via the proxy or `TRUST_TRACEPARENT=1`; log fields cannot override standard ones; symlink-safe update; UI security headers; reserved words refused by generators; public guard also scans `.memory/` + README)
 - Tests: gate 462 unit (5 MySQL-only skipped) + 4 e2e · `gate:kit` 18/18 twice in a row · GitHub Actions green
 - Upgrade notes for v0.2.0 projects (app-owned files are not rewritten by `update`): mount auth on `*`; set `NUXT_PUBLIC_SITE_URL`; port the items live-unique pattern by hand; drop `container_name` from compose; job locks are now `<name>.lock.<n>`
-
-## 2026-11-16
 
 ### v0.2.0 — first kit release (epic t1092)
 - Tag v0.2.0 = layer + kit (package.json and `kit/runtime/api/kit-version.ts` bumped together) · layer change: `useAuth` also reads the API envelope of `GET /api/v1/me`
