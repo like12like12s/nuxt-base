@@ -487,6 +487,11 @@ npm run gate:kit    # slow: every combo in tests/combos.mjs -> temp dir -> npm i
 node kit/tests/kit-gate.mjs --only fullstack --keep     # one family, keep the temp dirs
 ```
 
+Ports of the kit gate: each combo takes a block of 10 host ports above a base that differs per run (derived from the
+pid; `--port-base N` pins it). A block is probed right before its combo starts — every port, with a real listen —
+and a block in which another process holds a port is skipped with a `NOTICE` (`kit/tests/ports.mjs`), so two gate
+runs or an unrelated server on the machine cost a notice, not a combo.
+
 The unit tests cover composition per kind / preset / module, determinism, every exit code, check / update, generator
 dispatch, the locked runtime at the source — `runtime-api` (trace id, error shape, pagination, health, createApi),
 `runtime-db` (migrate up → down → up, audit, soft delete, retry with fault injection, the db commands) and

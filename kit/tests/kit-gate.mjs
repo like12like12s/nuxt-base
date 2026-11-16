@@ -19,6 +19,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { combos } from './combos.mjs'
+import { portBlocks } from './ports.mjs'
 
 const KIT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const REPO = resolve(KIT, '..')
@@ -51,6 +52,9 @@ const localRef = flags['layer-ref'] ?? REPO
 // one machine — two checkouts, two sessions — do not answer each other's probes. --port-base pins it.
 const PORT_BASE = Number(flags['port-base']) || 30000 + (process.pid % 140) * 250
 if (!Number.isInteger(PORT_BASE) || PORT_BASE < 1024 || PORT_BASE > 65000) { console.error('kit gate: --port-base must be a port between 1024 and 65000'); process.exit(2) }
+// The base only says where to start: a block is probed right before its combo starts, and one with a port another
+// process holds is skipped (ports.mjs) — a busy port costs a notice, not a combo.
+const ports = portBlocks({ base: PORT_BASE, size: 10, onSkip: ({ start, busy }) => console.log(`NOTICE port ${busy} is in use — the block ${start}-${start + 9} is skipped`) })
 
 const dirs = new Set()
 const schemas = new Set() // `test_gate_*` schemas created on the MySQL server — dropped after each combo and on exit
@@ -209,7 +213,7 @@ async function gateCombo(combo, index) {
   const dir = join(tmp, 'app')
   const log = join(tmp, 'gate.log')
   writeFileSync(log, `kit gate — ${combo.id}\n`)
-  const port = PORT_BASE + index * 10
+  const port = await ports.next()
   const started = Date.now()
   let step = 'scaffold'
   const steps = []
