@@ -179,6 +179,30 @@ describe('update', () => {
     expect(cli(['update', dir, '--json'], { kit }).status).toBe(0)
   })
 
+  // fix4 B3: UPGRADING notes said "copy from a freshly scaffolded project" — the kit can print that file itself.
+  it('--show <path> prints a file as this kit generates it for this project — app-owned or locked — and writes nothing', () => {
+    const dir = project(['--kind', 'fullstack', '--with', 'db,auth,api,og,security', '--deploy', 'container'])
+    const original = read(dir, 'api/src/app.ts')
+    appendFileSync(join(dir, 'api/src/app.ts'), '\n// my own route\n')
+    rmSync(join(dir, 'ui/server/og.ts'))
+    const before = snapshot(dir)
+    const plain = cli(['update', dir, '--show', 'api/src/app.ts'])
+    expect(plain.status).toBe(0)
+    expect(plain.stdout).toBe(original) // byte for byte: it can be piped into diff
+    expect(cli(['update', '--show', './ui/server/og.ts'], { cwd: dir }).stdout).toContain('export const RECORDS')
+    const shown = cli(['update', dir, '--show', 'docker/docker-compose.yml', '--json'])
+    expect(shown.json).toMatchObject({ ok: true, path: 'docker/docker-compose.yml', owner: 'app', kit: { current: JSON.parse(read(dir, '.scaffold.json')).kit } })
+    expect(shown.json.content).toContain('API_URL: http://api:3000')
+    expect(cli(['update', dir, '--show', 'api/src/kit/api/env.ts', '--json']).json.owner).toBe('kit')
+    expect(snapshot(dir)).toEqual(before)
+    // a path the kit does not generate for this project: exit 2, with the neighbours
+    const unknown = cli(['update', dir, '--show', 'api/src/nope.ts', '--json'])
+    expect(unknown.status).toBe(2)
+    expect(unknown.json).toMatchObject({ ok: false, code: 'unknown_file' })
+    expect(unknown.json.message).toContain('api/src/app.ts')
+    expect(cli(['update', dir, '--show', '../outside', '--json']).json.code).toBe('unknown_file')
+  })
+
   it('restores edited and missing locked files and leaves app-owned files alone', () => {
     const dir = project(['--kind', 'fullstack', '--deploy', 'container'])
     const before = snapshot(dir)

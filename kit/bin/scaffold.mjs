@@ -15,6 +15,8 @@ const USAGE = `usage:
            page: also a path — reports/monthly, reports/[id] · resource --og: link preview of the detail page (opt-in)
   scaffold check [<dir>] [--json]      exit 0 clean, 1 drift (names the kit version + commit it compared against)
   scaffold update [<dir>] [--json]     re-copy locked files + bump the layer tag; prints the by-hand notes of UPGRADING.md
+  scaffold update [<dir>] --show <path>   print a file as this kit generates it for this project (writes nothing) —
+                                       the current form of an app-owned file, to diff against your own
   scaffold list [--json]
 exit codes: 0 ok, 1 drift (check), 2 usage, 3 target dir not empty, 4 unknown/incompatible kind, module or preset\n            (also: update of a project that is at a newer kit),\n            70 internal error (a kit bug — never reported as drift)`
 
@@ -44,6 +46,7 @@ function parse(argv) {
         'no-sample': { type: 'boolean' },
         lang: { type: 'string' },
         og: { type: 'boolean' },
+        show: { type: 'string' },
         json: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
       },
@@ -97,7 +100,7 @@ async function run(argv) {
       return cmdCheck(kit, { dir: rest[0] ?? flags.dir })
     case 'update':
       max(1)
-      return cmdUpdate(kit, { dir: rest[0] ?? flags.dir })
+      return cmdUpdate(kit, { dir: rest[0] ?? flags.dir, show: flags.show })
     case 'list':
       max(0)
       return cmdList(kit)
@@ -149,6 +152,7 @@ const json = process.argv.includes('--json')
 try {
   const { exit, result, text: plain } = await run(process.argv.slice(2))
   if (plain) (exit === EXIT.OK ? console.log : console.error)(plain)
+  else if (!json && typeof result.content === 'string') process.stdout.write(result.content) // update --show: the file, byte for byte
   else console.log(json ? JSON.stringify(result, null, 2) : text(result))
   process.exitCode = exit
 } catch (e) {

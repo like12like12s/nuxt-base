@@ -137,6 +137,23 @@ export function cmdCheck(kit, opts) {
   }
 }
 
+// `update --show <path>`: the file as THIS kit generates it for THIS project (its kind, modules, answers) — read-only.
+// It is how an owner sees the current form of an app-owned file that `update` never rewrites: diff it against the
+// project's own (`scaffold update --show api/src/app.ts | diff - api/src/app.ts`) and take over what UPGRADING.md names.
+// Files that `add` generated later (resources, pages, jobs) are not part of it.
+function showFile(kit, dir, path) {
+  const manifest = readManifest(dir)
+  const plan = composeFromManifest(kit, manifest)
+  const wanted = posix.normalize(String(path).replaceAll('\\', '/')).replace(/^\.\//, '')
+  const file = plan.files.find((f) => f.path === wanted)
+  if (!file) {
+    const near = plan.files.map((f) => f.path).filter((p) => posix.dirname(p) === posix.dirname(wanted) || posix.basename(p) === posix.basename(wanted)).slice(0, 12)
+    throw usageError(`update --show: "${path}" is not a file this kit generates for this project${near.length ? ` — did you mean: ${near.join(', ')}` : ''}`, 'unknown_file')
+  }
+  const source = kitSource(kit)
+  return { exit: EXIT.OK, result: { ok: true, dir, path: wanted, owner: wanted in plan.locked ? 'kit' : 'app', kit: kitInfo(kit, source, { project: manifest.kit ?? null, current: kit.version }), content: file.content } }
+}
+
 // Re-copy locked files from the current kit and bump the layer tag. App-owned files are never touched, nothing is deleted.
 export function cmdUpdate(kit, opts) {
   const dir = resolve(opts.dir ?? '.')
@@ -146,6 +163,7 @@ export function cmdUpdate(kit, opts) {
   if (/^\d+\.\d+\.\d+$/.test(projectKit ?? '') && compareVersions(projectKit, kit.version) > 0) {
     throw incompatible('kit_older', `update: ${dir} is at kit ${projectKit}, this kit is ${kit.version} — an older kit never updates a newer project (it would downgrade its locked files). Run the update with kit ${projectKit} or newer.`)
   }
+  if (opts.show !== undefined) return showFile(kit, dir, opts.show)
   const { manifest, plan, drift, unreleased, layer, fromConfig, source, warnings } = diff(kit, dir)
   const updated = []
   const orphaned = []
