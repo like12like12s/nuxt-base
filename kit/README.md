@@ -358,7 +358,9 @@ api       hono + @hono/zod-openapi (contract-first routes) · /api/v1 via mountV
           the API's error body into one line with the trace id and — for a 400 — a message per field from `details`
 db        Kysely · SQLite through node:sqlite (built in — no native module) or MySQL through mysql2 · one migration
           set written with the schema builder, every migration reversible · base tables users / audit /
-          service_tokens · standard columns id / createdAt / updatedAt / deletedAt, soft delete, audited() = the write
+          service_tokens · standard columns id / createdAt / updatedAt / deletedAt, soft delete, "unique among live
+          rows" by a generated column + unique index (liveValue(); addLiveUnique() / dropLiveUnique() add it to a
+          table that already exists, portable across both engines), audited() = the write
           and its audit row in one transaction · connect + statement deadlines, bounded retry on transient errors only
           (deadlock, lock wait, connection refused; a lost connection replays reads, never writes), withTransaction()
           replays a whole unit, the pool closes on shutdown · db:migrate up|down|status, db:seed (deterministic),

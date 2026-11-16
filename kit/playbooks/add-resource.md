@@ -52,6 +52,9 @@ A 400 from the API is shown at the field it is about: `apiProblem(res.error).fie
    already keeps `name` unique among live rows — in the database (generated `liveName` column + unique index, see
    `liveValue` in `src/kit/db/schema.ts`), answered as `409 CONFLICT`. Use the same pattern for any other unique
    field; never check-then-insert. If names need not be unique, remove the column, the index and the 409 mapping.
+   A table whose migration has already shipped gets the rule in a NEW migration, the same on SQLite and MySQL:
+   `up: (db) => addLiveUnique(db, '<table>', '<column>')`, `down: (db) => dropLiveUnique(db, '<table>', '<column>')`
+   (`src/kit/db/schema.ts`; it refuses to run while live rows still share a value).
 
 4. Fullstack — every field you added, in both pages: an entry in `form` (a `ref({...})`, not `reactive()`), an input
    with its `problem.fields.<field>` line in the form, the field in the request `body`, a row in the detail list —

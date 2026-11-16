@@ -7,7 +7,7 @@
 //   timestamps   varchar(24)  — ISO-8601 UTC strings (now()); identical on both engines, sortable as text
 //   json         text         — JSON.stringify / JSON.parse in the repository (toJson / fromJson)
 //   strings      varchar(n) with n <= 191 when indexed (MySQL utf8mb4 index limit)
-import { sql, type CreateTableBuilder, type Kysely, type RawBuilder } from 'kysely'
+import { SqliteAdapter, sql, type CreateTableBuilder, type Kysely, type RawBuilder } from 'kysely'
 import type { Migration } from 'kysely/migration'
 
 /** id, createdAt, updatedAt, deletedAt — on every table that holds business data. */
@@ -29,6 +29,56 @@ export function standardColumns<T extends string, C extends string = never>(tabl
  * repo.ts). A check-then-insert cannot do this: two concurrent requests both pass the check.
  */
 export const liveValue = (column: string): RawBuilder<string | null> => sql<string | null>`case when ${sql.ref('deletedAt')} is null then ${sql.ref(column)} end`
+
+export interface LiveUniqueNames {
+  /** The generated column. Default `live<Column>` (`name` -> `liveName`). */
+  liveColumn?: string
+  /** The unique index. Default `<table>_live_<column>_uq`. */
+  index?: string
+  /** varchar length of the generated column — at most 191 (it is indexed). Default 191. */
+  length?: number
+}
+const liveNames = (table: string, column: string, names: LiveUniqueNames) => ({
+  liveColumn: names.liveColumn ?? `live${column.charAt(0).toUpperCase()}${column.slice(1)}`,
+  index: names.index ?? `${table}_live_${column}_uq`,
+  length: names.length ?? 191,
+})
+
+/**
+ * "Unique among live rows" for a table that ALREADY EXISTS (its create-table migration has shipped): adds the
+ * generated column and its unique index, the same on SQLite and MySQL. Call it in the `up` of a NEW migration and
+ * dropLiveUnique() in its `down`:
+ *   up:   (db) => addLiveUnique(db, 'orders', 'name')
+ *   down: (db) => dropLiveUnique(db, 'orders', 'name')
+ * Then add `liveName: GeneratedAlways<string | null>` to the table type and map the duplicate-key error to 409
+ * (isUniqueViolation in repo.ts). When live rows already share a value the index cannot be built: this throws before
+ * it changes anything and says how many values are affected — rename or soft-delete the duplicates, then migrate.
+ */
+export async function addLiveUnique(db: Kysely<any>, table: string, column: string, names: LiveUniqueNames = {}): Promise<void> {
+  const { liveColumn, index, length } = liveNames(table, column, names)
+  const duplicates = await db
+    .selectFrom(table)
+    .select(column)
+    .where('deletedAt', 'is', null)
+    .where(column, 'is not', null)
+    .groupBy(column)
+    .having((eb) => eb.fn.countAll(), '>', 1)
+    .execute()
+  if (duplicates.length) {
+    throw new Error(`${table}.${column}: ${duplicates.length} value(s) are used by more than one live row — the unique index cannot be built. Rename or soft-delete the duplicates, then run the migration again.`)
+  }
+  await db.schema.alterTable(table).addColumn(liveColumn, `varchar(${length})`, (col) => col.generatedAlwaysAs(liveValue(column))).execute()
+  await db.schema.createIndex(index).on(table).column(liveColumn).unique().execute()
+}
+
+/** Undo addLiveUnique(). DROP INDEX is where the engines differ: MySQL wants the table named, SQLite refuses it. */
+export async function dropLiveUnique(db: Kysely<any>, table: string, column: string, names: LiveUniqueNames = {}): Promise<void> {
+  const { liveColumn, index } = liveNames(table, column, names)
+  const drop = db.schema.dropIndex(index)
+  await (db.getExecutor().adapter instanceof SqliteAdapter ? drop : drop.on(table)).execute()
+  // (SQLite refuses to drop a column that is still indexed — the index goes first.)
+  await db.schema.alterTable(table).dropColumn(liveColumn).execute()
+}
 
 export interface StandardColumns {
   id: string

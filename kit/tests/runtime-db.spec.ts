@@ -16,7 +16,7 @@ import { appliedMigrations, backupSqlite, verifySqliteFile, migrateDown, migrate
 import { DbTimeoutError } from '../runtime/db/mysql'
 import { audited, created, fromJson, isUniqueViolation, softDeleted, toJson, touched, withTransaction, writeAudit } from '../runtime/db/repo'
 import { retryTransient, transientKind, type RetryEvent } from '../runtime/db/resilient'
-import { baseMigration, liveValue, standardColumns, type BaseTables } from '../runtime/db/schema'
+import { addLiveUnique, baseMigration, dropLiveUnique, liveValue, standardColumns, type BaseTables } from '../runtime/db/schema'
 import { createTestDb, mysqlSkipNotice, mysqlTestUrl, type TestDb } from '../runtime/testing/test-db'
 
 interface Things { id: string; name: string; count: number; createdAt: string; updatedAt: string; deletedAt: string | null; liveName: GeneratedAlways<string | null> }
@@ -264,6 +264,59 @@ describe.each(DIALECTS)('audit + soft delete on %s', (dialect) => {
     expect((await db.selectFrom('things').select('id').where('deletedAt', 'is', null).execute()).map((r) => r.id)).toEqual([b.id])
     const all = await db.selectFrom('things').select(['id', 'deletedAt']).orderBy('name').execute()
     expect(all.map((r) => r.deletedAt === null)).toEqual([false, true])
+  })
+})
+
+// fix4 B5: a project that already shipped its create-table migration adds the rule in a NEW migration. DROP INDEX
+// differs between the engines — the helpers hide that, and refuse to start when live duplicates exist.
+describe.each(DIALECTS)('addLiveUnique / dropLiveUnique for an existing table on %s', (dialect) => {
+  interface Orders { id: string; name: string; createdAt: string; updatedAt: string; deletedAt: string | null; liveName: GeneratedAlways<string | null> }
+  const shipped: Migrations = {
+    '0001_base': baseMigration,
+    '0002_orders': {
+      up: async (db) => { await standardColumns(db.schema.createTable('orders')).addColumn('name', 'varchar(191)', (c) => c.notNull()).execute() },
+      down: async (db) => { await db.schema.dropTable('orders').execute() },
+    },
+  }
+  const withRule: Migrations = { ...shipped, '0003_orders_live_name': { up: (db) => addLiveUnique(db, 'orders', 'name'), down: (db) => dropLiveUnique(db, 'orders', 'name') } }
+  const order = (name: string, deleted = false) => ({ ...created(), name, ...(deleted ? softDeleted() : {}) })
+
+  it('up on a table with data, down, and up again: live names become unique, deleted ones do not count', async () => {
+    const database = await testDb({ dialect, migrations: shipped })
+    const db = database.db as unknown as Kysely<{ orders: Orders }>
+    await db.insertInto('orders').values([order('kept'), order('gone', true), order('gone', true), order('gone')]).execute()
+
+    expect((await migrateUp(database.db, withRule)).map((r) => `${r.migrationName} ${r.status}`)).toEqual(['0003_orders_live_name Success'])
+    expect(await db.selectFrom('orders').select(['name', 'liveName']).orderBy('createdAt').orderBy('id').execute()).toHaveLength(4)
+    expect((await db.selectFrom('orders').select('liveName').where('deletedAt', 'is not', null).execute()).map((r) => r.liveName)).toEqual([null, null])
+    const refused = await db.insertInto('orders').values(order('kept')).execute().then(() => null, (e: unknown) => e)
+    expect(isUniqueViolation(refused)).toBe(true)
+    await db.insertInto('orders').values(order('new')).execute()
+
+    // down: index and column are gone on this engine, the rows are untouched, duplicates are possible again
+    expect((await migrateDown(database.db, withRule)).map((r) => `${r.migrationName} ${r.direction}`)).toEqual(['0003_orders_live_name Down'])
+    expect(await schemaState(database.db, shipped)).toMatchObject({ state: 'ok' })
+    await db.insertInto('orders').values(order('new')).execute()
+    expect(await db.selectFrom('orders').select('name').where('name', '=', 'new').execute()).toHaveLength(2)
+
+    // and now `up` refuses — before it changes anything — because two live rows share a name
+    const again = await migrateUp(database.db, withRule).then(() => null, (e: Error) => e)
+    expect(`${again?.message} ${(again?.cause as Error | undefined)?.message ?? ''}`).toMatch(/orders\.name: 1 value\(s\) are used by more than one live row/)
+    expect(await schemaState(database.db, shipped)).toMatchObject({ state: 'ok' })
+    await db.updateTable('orders').set(softDeleted()).where('name', '=', 'new').execute()
+    await migrateUp(database.db, withRule)
+    expect(await schemaState(database.db, withRule)).toMatchObject({ state: 'ok' })
+  })
+
+  it('names can be chosen', async () => {
+    const database = await testDb({ dialect, migrations: shipped })
+    await addLiveUnique(database.db, 'orders', 'name', { liveColumn: 'activeName', index: 'orders_active_name_uq', length: 100 })
+    const db = database.db as unknown as Kysely<{ orders: Orders & { activeName: GeneratedAlways<string | null> } }>
+    await db.insertInto('orders').values(order('a')).execute()
+    expect((await db.selectFrom('orders').select('activeName').executeTakeFirstOrThrow()).activeName).toBe('a')
+    await dropLiveUnique(database.db, 'orders', 'name', { liveColumn: 'activeName', index: 'orders_active_name_uq' })
+    await addLiveUnique(database.db, 'orders', 'name') // the defaults: liveName, orders_live_name_uq
+    expect((await (database.db as unknown as Kysely<{ orders: Orders }>).selectFrom('orders').select('liveName').executeTakeFirstOrThrow()).liveName).toBe('a')
   })
 })
 
