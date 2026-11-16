@@ -15,8 +15,9 @@ everything around it: preflight, install, gate, git, registration.
 node <KIT>/bin/scaffold.mjs new <name> --kind nuxt-app|api|fullstack [--with a,b,c] [--db sqlite|mysql]
      [--deploy cf-pages|container|pm2] [--port N] [--api-port N] [--no-sample] [--lang th|en]
      --dir <target> [--context ctx.json] [--dry-run] [--json]
-node <KIT>/bin/scaffold.mjs add resource|page|job <name> [--dir <project>] [--json]
-                                   (page: <name> may be a route path — reports/monthly, reports/[id])
+node <KIT>/bin/scaffold.mjs add resource|page|job <name> [--og] [--dir <project>] [--json]
+                                   (page: <name> may be a route path — reports/monthly, reports/[id];
+                                    resource --og: also list the detail page for link previews — opt-in)
 node <KIT>/bin/scaffold.mjs check [<dir>] [--json]     exit 0 clean · 1 drift
 node <KIT>/bin/scaffold.mjs update [<dir>] [--json]    re-copy locked files + bump the layer tag
 node <KIT>/bin/scaffold.mjs list [--json]              kinds, modules, deploy presets, kitVersion
@@ -30,9 +31,12 @@ exit  meaning
 1     drift — `check` only: a locked file was edited / is missing / is behind a RELEASED kit, or the layer tag is
       behind. (Differences caused by unreleased work in the kit directory are not drift — exit 0, state `kit-unreleased`.)
 2     usage — bad flag or name, missing --kind / --dir, not a scaffolded project (check / update / add),
-      `add`: a `kit:anchor` comment the generator needs was removed (code `anchor_missing`; nothing is written)
+      `add`: a `kit:anchor` comment the generator needs was removed (code `anchor_missing`; nothing is written),
+      a route that names a parameter twice (`duplicate_param`), `--og` without the og module in a fullstack
+      project (`og_unavailable`)
 3     the target dir exists and is not empty (`new`) · a generator's output file already exists (`add`)
 4     unknown or incompatible kind, module (also: planned) or preset · no generator for that type in the project
+      · `update`: the project is at a NEWER kit than the one running (code `kit_older`; nothing is written)
 70    internal error (a kit or generator bug). Deliberately not 1, so a crash never reads as drift.
 ```
 
@@ -155,6 +159,10 @@ rewrites `.scaffold.json`. It never touches an app-owned file and never deletes:
 `orphaned` and left in place; a layer ref it cannot find in `nuxt.config.ts` is a warning, and `check` keeps failing.
 It does not change `package.json` — dependency bumps stay a deliberate, reviewed change.
 
+`update` never downgrades: when the project's manifest names a kit version newer than the running kit (semver
+compare of `kit` in `.scaffold.json` with the kit's version) it stops with exit 4 / code `kit_older` before reading
+or writing anything else — an older kit would re-copy its older locked files over newer ones. Use the newer kit.
+
 ## Layout
 
 ```
@@ -254,7 +262,8 @@ project sees it as `outdated` until `scaffold update`. `runtime/api/kit-version.
 ### Generators (`scaffold add`)
 
 A unit that is part of the project (its kind, or an installed module) may provide a generator per type. The module
-default-exports `({ name, type, dir, part, parts, manifest, project }) => ({ files, patches?, next? })`, sync or async:
+default-exports `({ name, type, dir, part, parts, manifest, project, options }) => ({ files, patches?, next? })`, sync or
+async (`options` = the flags of `add` that belong to generators; today `{ og: boolean }`):
 
 ```
 files    [{ path, content, part? }]          new files; refused when one exists (exit 3)
@@ -275,7 +284,8 @@ kit: it runs no command, so derived files (`openapi.json`, the typed client) are
 `lib/names.mjs` gives every spelling of a name (`order-lines` -> `OrderLine`, `order_lines`, …); `lib/i18n.mjs` holds
 the words generated pages say, per language — a generator takes them with `text(langOf(manifest))`, never a literal. A name whose
 identifier would be a reserved word or shadow a built-in type (`delete`, `classes`, `errors`) is refused (exit 2,
-code `reserved_name`). `update` / `add` never write through a symlink that leaves the project (`path_escape`).
+code `reserved_name`), and so is a route path that uses one parameter name twice (`orders/[id]/lines/[id]` — exit 2,
+`duplicate_param`; a resource name is one word and has no parameter of its own). `update` / `add` never write through a symlink that leaves the project (`path_escape`).
 
 ```
 page       kind nuxt-app (also in fullstack)   app/pages/<path>.vue on the AsyncState pattern + its e2e spec. <path> is
@@ -290,7 +300,9 @@ resource   module api                           schemas, repository (name unique
                                                 matrix of tests/auth.spec.ts; fullstack: app/pages/<name>/index.vue (list
                                                 + create form) and <name>/[id].vue (detail, edit form, soft delete) —
                                                 forms in the layer's Modal, delete behind ConfirmModal, a 400 shown per
-                                                field — with an e2e spec that walks all of it
+                                                field — with an e2e spec that walks all of it. `--og` (og module):
+                                                also lists the detail page in RECORDS of server/og.ts — opt-in,
+                                                because a preview shows record names to any crawler user agent
 job        module jobs                          src/jobs/<name>.ts, its test, the registration in src/jobs/index.ts and
                                                 .memory/docs/guides/job-<name>.md (the scheduler entry for the operator)
 ```
@@ -398,7 +410,8 @@ og        per-URL title / description / og:* / twitter:* / canonical for crawler
           og:url / canonical / site-relative images come from NUXT_PUBLIC_SITE_URL only — the request's Host and
           X-Forwarded-Host are never believed (without the setting those tags are left out), and the path cannot
           select another host. Unlisted URLs get the site preview, never a title derived from the path.
-          fullstack: `RECORDS` in server/og.ts maps a detail page (`/orders/<id>`, added by `add resource`) to its
+          fullstack: `RECORDS` in server/og.ts maps a detail page (`/orders/<id>`, added by `add resource --og` —
+          opt-in; without the flag `next[]` names the line to add; entries already there stay) to its
           API collection; the lookup is made by the UI server through server/utils/server-api.ts with the
           role-less service token in API_SERVICE_TOKEN — a crawler has no session and the API refuses anonymous
           callers. With `auth`, `new` says in `next[]` that crawlers cannot pass single sign-on.

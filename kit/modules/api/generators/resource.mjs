@@ -5,6 +5,7 @@
 // are derived files: the generator is pure, so regenerating them is the first step in `next`.
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { usageError } from '../../../lib/errors.mjs'
 import { langOf, text } from '../../../lib/i18n.mjs'
 import { names } from '../../../lib/names.mjs'
 
@@ -14,7 +15,7 @@ function nextSequence(apiDir) {
   return String(Math.max(1, ...taken) + 1).padStart(4, '0')
 }
 
-export default function generate({ name, dir, manifest, parts }) {
+export default function generate({ name, dir, manifest, parts, options }) {
   const n = names(name)
   const auth = manifest.modules.includes('auth')
   // The `editor` role belongs to the example resource: a project created with --no-sample only has `admin` until the
@@ -359,9 +360,12 @@ describe('${n.kebab}', () => {
   }
 
   // Link preview of the detail page (og module, fullstack): /<name>/<id> -> the record's name, read by the UI server.
-  if (hasUi && manifest.modules.includes('og')) {
-    patches.push({ part: 'ui', path: 'server/og.ts', anchor: 'og-records', insert: `'/${n.kebab}': '/api/v1/${n.kebab}',`, optional: true })
-  }
+  // Opt-in (`--og`): a preview shows the record's name to anyone who reaches the UI with a crawler user agent, so a
+  // collection is only listed when somebody decided its names may be shown.
+  const canPreview = hasUi && manifest.modules.includes('og')
+  const ogEntry = `'/${n.kebab}': '/api/v1/${n.kebab}',`
+  if (options?.og && !canPreview) throw usageError(`add resource ${name}: --og needs the og module in a fullstack project (this project: kind ${manifest.kind}, modules ${manifest.modules.join(', ')})`, 'og_unavailable')
+  if (options?.og) patches.push({ part: 'ui', path: 'server/og.ts', anchor: 'og-records', insert: ogEntry, optional: true })
 
   if (hasUi) {
     // The UI of the resource, in the project's one language: a list page with a create form and a detail page with
@@ -715,6 +719,7 @@ test('${k}: a record that does not exist shows the API error, not a blank page',
     `${apiDir}: npm run contract   # regenerates openapi.json — tests/contract.spec.ts is red until you do`,
     ...(hasUi ? [`${parts.ui.dir || '.'}: npm run client   # regenerates app/api/schema.d.ts — the new page does not typecheck until you do`] : []),
     `${apiDir}: npm run db:migrate -- up   # apply ${migration} to your development database`,
+    ...(canPreview && !options?.og ? [`link preview: /${n.kebab}/<id> gets the site's generic preview. To show the record's name to crawlers (it is then visible to anyone who reaches the UI with a crawler user agent), add ${ogEntry} to RECORDS in ${parts.ui.dir || '.'}/server/og.ts — \`add resource --og\` does that`] : []),
     'npm run gate',
   ]
   return { files, patches, next }

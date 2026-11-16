@@ -1,7 +1,7 @@
 // @vitest-environment node
 // What the og module composes (behaviour: runtime-og.spec.ts, and the e2e spec the kit gate runs on Node and on
 // wrangler's Pages runtime).
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { cleanup, cli, read, snapshot, tmp } from './helpers'
@@ -94,24 +94,40 @@ describe('og with an API (fullstack) — and with auth', () => {
     expect(read(dir, 'server/og.ts')).not.toMatch(/@kit:|serverApi/)
   })
 
-  it('add resource lists its detail page for previews; a project whose og.ts has no anchor still gets the resource', () => {
+  // K-L4 (review 2): listing a collection in RECORDS shows its record names to anyone with a crawler user agent — opt-in.
+  it('add resource lists its detail page for previews only with --og; without it next[] says how; an og.ts without the anchor still gets the resource', () => {
     const { dir } = scaffold(FULL)
-    const r = cli(['add', 'resource', 'orders', '--dir', dir, '--json'])
+    const before = read(dir, 'ui/server/og.ts')
+    const plainAdd = cli(['add', 'resource', 'invoices', '--dir', dir, '--json'])
+    expect(plainAdd.status, plainAdd.stdout).toBe(0)
+    expect(plainAdd.json.patched).not.toContain('ui/server/og.ts')
+    expect(read(dir, 'ui/server/og.ts')).toBe(before)
+    expect(plainAdd.json.next.join('\n')).toContain("add '/invoices': '/api/v1/invoices', to RECORDS in ui/server/og.ts — `add resource --og` does that")
+
+    const r = cli(['add', 'resource', 'orders', '--og', '--dir', dir, '--json'])
     expect(r.status, r.stdout).toBe(0)
     expect(r.json.patched).toContain('ui/server/og.ts')
     expect(read(dir, 'ui/server/og.ts')).toContain("  '/orders': '/api/v1/orders',\n  // kit:anchor og-records")
+    expect(read(dir, 'ui/server/og.ts')).not.toContain("'/invoices'")
+    expect(r.json.next.join('\n')).not.toContain('link preview')
 
     // og.ts as kit 0.2.0 wrote it (no anchor): the optional patch is skipped and named in next[], nothing fails
     const old = scaffold(FULL).dir
     const file = join(old, 'ui/server/og.ts')
     writeFileSync(file, readFileSync(file, 'utf8').split('\n').filter((l) => !l.includes('kit:anchor og-records')).join('\n'))
-    const skipped = cli(['add', 'resource', 'orders', '--dir', old, '--json'])
+    const skipped = cli(['add', 'resource', 'orders', '--og', '--dir', old, '--json'])
     expect(skipped.status, skipped.stdout).toBe(0)
     expect(skipped.json.patched).not.toContain('ui/server/og.ts')
     expect(skipped.json.files).toContain('ui/app/pages/orders/[id].vue')
     expect(skipped.json.next.join('\n')).toContain("ui/server/og.ts: no `kit:anchor og-records` there — if you want it, add by hand: '/orders': '/api/v1/orders',")
-    // without the og module there is no patch at all
+    // without the og module there is nothing to opt into: no hint, and --og is refused before anything is written
     const plain = scaffold(['--kind', 'fullstack', '--with', 'api,db']).dir
-    expect(cli(['add', 'resource', 'orders', '--dir', plain, '--json']).json.next.join('\n')).not.toContain('og-records')
+    const refused = cli(['add', 'resource', 'orders', '--og', '--dir', plain, '--json'])
+    expect(refused.status).toBe(2)
+    expect(refused.json).toMatchObject({ ok: false, code: 'og_unavailable' })
+    expect(existsSync(join(plain, 'api/src/resources/orders'))).toBe(false)
+    expect(cli(['add', 'resource', 'orders', '--dir', plain, '--json']).json.next.join('\n')).not.toMatch(/og-records|link preview/)
+    // and the flag belongs to `add resource` alone
+    expect(cli(['add', 'page', 'reports', '--og', '--dir', dir, '--json']).json).toMatchObject({ ok: false, code: 'usage' })
   })
 })

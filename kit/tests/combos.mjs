@@ -327,7 +327,8 @@ async function fullModules(t) {
     if (!existsSync(join(t.dir, `.memory/docs/guides/playbook-${name}.md`))) t.fail(`playbook-${name}.md is not in the project`)
   }
   t.begin('playbook add-resource: scaffold add resource order-lines')
-  const resource = JSON.parse((await t.scaffold(['add', 'resource', 'order-lines', '--dir', t.dir, '--json'])).out)
+  // --og (opt-in): the link preview of the record page is part of what this combo proves below
+  const resource = JSON.parse((await t.scaffold(['add', 'resource', 'order-lines', ...(t.uiDir && t.plan.modules.includes('og') ? ['--og'] : []), '--dir', t.dir, '--json'])).out)
   t.begin('playbook add-job: scaffold add job nightly-sync')
   await t.scaffold(['add', 'job', 'nightly-sync', '--dir', t.dir, '--json'])
   if (t.uiDir) {

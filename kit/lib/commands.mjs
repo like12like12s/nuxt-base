@@ -219,6 +219,9 @@ export async function cmdAdd(kit, opts) {
   const params = name.match(/\[[^\]]+\]/g) ?? []
   const repeated = params.find((param, i) => params.indexOf(param) !== i)
   if (repeated) throw usageError(`add ${type}: "${name}" names the route parameter ${repeated} twice — give each dynamic segment its own name (e.g. ${name.replace(repeated, '[parentId]')})`, 'duplicate_param')
+  // --og is the opt-in of `add resource` for the link preview of its detail page (record names become visible to
+  // anyone who reaches the UI with a crawler user agent) — it means nothing for another type.
+  if (opts.og && type !== 'resource') throw usageError(`add ${type}: --og only applies to \`add resource\``)
   const reserved = (isPage ? name.split('/').filter((segment) => !segment.startsWith('[')) : [name]).map(reservedName).find(Boolean)
   if (reserved) throw usageError(`add ${type}: "${name}" cannot be used as a name — ${reserved}. Pick a more specific one (e.g. ${name}-${type === 'job' ? 'job' : type === 'page' ? 'page' : 'records'}).`, 'reserved_name')
   const dir = resolve(opts.dir ?? '.')
@@ -245,7 +248,7 @@ export async function cmdAdd(kit, opts) {
     return plan.parts.find((p) => p.type === partName)?.dir
   }
   const parts = Object.fromEntries(plan.parts.map((p) => [p.type, { type: p.type, dir: p.dir, abs: join(dir, p.dir) }]))
-  const out = await mod.default({ name, type, dir: join(dir, part.dir), part, parts, manifest, project: dir })
+  const out = await mod.default({ name, type, dir: join(dir, part.dir), part, parts, manifest, project: dir, options: { og: !!opts.og } })
   const located = (list, what) => (list ?? []).flatMap((entry) => {
     const base = dirOf(entry.part)
     if (base === undefined) return []

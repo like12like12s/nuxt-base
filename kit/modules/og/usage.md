@@ -11,8 +11,9 @@
   `X-Forwarded-Host` are client-controlled and are never believed (only `nuxt dev` uses `Host`); without the
   setting those three tags are left out and the preview has just its title and description.
 <!-- @kit:if kind:fullstack -->
-- Record pages (`/orders/<id>`): listed in `RECORDS` of `server/og.ts` (`scaffold add resource` adds its detail
-  page), previewed with the record's name. The lookup is made by the UI **server** through
+- Record pages (`/orders/<id>`): listed in `RECORDS` of `server/og.ts`, previewed with the record's name. Listing
+  is opt-in: `scaffold add resource <name> --og` adds its detail page; without `--og` nothing is listed and the
+  command prints the line to add by hand. Entries already in `RECORDS` stay until you remove them. The lookup is made by the UI **server** through
   `server/utils/server-api.ts` with the service token in `API_SERVICE_TOKEN` — create it without roles (read-only):
   `npm run auth:token -- create --name og-preview --days 365` in the API. Without the token, or when the API does
   not answer, the page gets the generic preview.

@@ -8,7 +8,12 @@ One command, then fill in. Do not copy another resource by hand.
 
 ```bash
 scaffold add resource <name>        # plural kebab-case: orders, order-lines   (from the project root)
+scaffold add resource <name> --og   # fullstack with the og module: also give /<name>/<id> a link preview
 ```
+
+`--og` is a decision, not a default: the preview of a record page carries the record's name, and anyone who can reach
+the UI with a crawler user agent sees it. Without the flag the page gets the site's generic preview and the command
+prints the one line to add to `RECORDS` in `ui/server/og.ts` if you decide so later.
 
 ## What it generates (API: `{{kit.apiDir}}`)
 
