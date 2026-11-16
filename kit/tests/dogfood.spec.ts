@@ -94,6 +94,39 @@ describe('dogfood: the repo\'s own CI', () => {
     expect(calls()).toEqual(['npm install --prefix api', 'npm install --prefix ui'])
   })
 
+  // fix4 B6: the pre-commit hook scans what is staged, gate:ci scanned only the history — a secret that was not
+  // committed yet passed a local gate:ci. Locally it now looks at both; in CI at the history (nothing is uncommitted).
+  it('gate:ci scans the history, and on a developer machine also what is not committed yet; without a repository it scans the files', () => {
+    const dir = tmp('gate-ci-modes')
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x', version: '1.0.0', scripts: { gate: 'node -e ""' } }))
+    const bin = join(dir, 'bin')
+    mkdirSync(bin)
+    symlinkSync(process.execPath, join(bin, 'node'))
+    symlinkSync(join(dirname(process.execPath), 'npm'), join(bin, 'npm'))
+    // a stand-in for gitleaks that records how it was called and fails for the mode named in FAIL_MODE
+    const calls = join(dir, 'calls.log')
+    writeFileSync(join(bin, 'gitleaks'), `#!/bin/sh\necho "$*" >> "${calls}"\n[ "$1" = "$FAIL_MODE" ] && exit 1\nexit 0\n`, { mode: 0o755 })
+    const run = (extra: Record<string, string> = {}) => {
+      writeFileSync(calls, '')
+      const r = spawnSync(process.execPath, [join(KIT_ROOT, 'runtime/project/gate-ci.mjs')], { cwd: dir, env: { PATH: `${bin}:/usr/bin:/bin`, HOME: dir, ...extra }, encoding: 'utf8' })
+      return { ...r, calls: readFileSync(calls, 'utf8').trim().split('\n').filter((line) => line !== 'version') }
+    }
+    // no repository: the files as they are
+    expect(run().calls).toEqual(['detect --source . --no-git --no-banner --redact'])
+    mkdirSync(join(dir, '.git'))
+    const local = run()
+    expect(local.status, local.stdout + local.stderr).toBe(0)
+    expect(local.calls).toEqual(['detect --source . --no-banner --redact', 'protect --source . --no-banner --redact'])
+    expect(run({ CI: 'true' }).calls).toEqual(['detect --source . --no-banner --redact'])
+    // either scan failing fails the gate, and says which
+    const history = run({ FAIL_MODE: 'detect' })
+    expect(history.status).toBe(1)
+    expect(history.stderr).toContain('gate:ci FAILED at: gitleaks (history)')
+    const uncommitted = run({ FAIL_MODE: 'protect' })
+    expect(uncommitted.status).toBe(1)
+    expect(uncommitted.stderr).toContain('gate:ci FAILED at: gitleaks (uncommitted changes)')
+  })
+
   it('`npm run gate:ci` is the kit\'s own gate-ci script (gate + gitleaks + npm audit)', () => {
     expect(rootPkg.scripts['gate:ci']).toBe('node kit/runtime/project/gate-ci.mjs')
     const script = readFileSync(join(KIT_ROOT, 'runtime/project/gate-ci.mjs'), 'utf8')
