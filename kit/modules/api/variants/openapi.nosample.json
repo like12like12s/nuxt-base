@@ -64,8 +64,10 @@
                   "NOT_FOUND",
                   "CONFLICT",
                   "RATE_LIMITED",
-                  "INTERNAL"
-                ]
+                  "INTERNAL",
+                  "COMMIT_OUTCOME_UNKNOWN"
+                ],
+                "description": "Switch on this, never on the message. COMMIT_OUTCOME_UNKNOWN (503): the write may have been applied — read the current state before sending it again."
               },
               "message": {
                 "type": "string"

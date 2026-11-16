@@ -344,8 +344,9 @@ code, migrations and tests are identical for both.
 ```
 api       hono + @hono/zod-openapi (contract-first routes) · /api/v1 via mountV1() · one error shape for every status
           >= 400: { error: { code, message, details?, traceId } } with the fixed code set VALIDATION UNAUTHORIZED
-          FORBIDDEN NOT_FOUND CONFLICT RATE_LIMITED INTERNAL (a 500 shows no cause; the log has it, driver messages
-          masked) · trace id generated, or from the `traceparent` of a TRUSTED caller (through the proxy, or
+          FORBIDDEN NOT_FOUND CONFLICT RATE_LIMITED INTERNAL COMMIT_OUTCOME_UNKNOWN (a 500 shows no cause; the log
+          has it, driver messages masked; 503 COMMIT_OUTCOME_UNKNOWN = the connection failed during COMMIT, the write
+          may have been applied — a client reads the state back before it retries) · trace id generated, or from the `traceparent` of a TRUSTED caller (through the proxy, or
           TRUST_TRACEPARENT=1), echoed in x-trace-id, on every log line (ts level msg service env traceId method
           path status ms) and in the audit row · lists: limit (50, max 200) / offset / sort / ids, envelopes { data } and
           { data, meta } · GET /health/live, /health/ready (pluggable checks, 503 + the check list), /version,

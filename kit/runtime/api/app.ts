@@ -11,7 +11,7 @@ import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi'
 import type { Context, MiddlewareHandler } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { getContext, resolveTraceId, runWithContext } from './context.js'
-import { ApiError, ErrorSchema, codeForStatus, errorBody, validation } from './errors.js'
+import { ApiError, COMMIT_OUTCOME_UNKNOWN_MESSAGE, ErrorSchema, codeForStatus, errorBody, isCommitOutcomeUnknown, validation } from './errors.js'
 import { runChecks, type HealthCheck } from './health.js'
 import { KIT_VERSION } from './kit-version.js'
 import { describeError, type Logger } from './log.js'
@@ -124,6 +124,11 @@ export function createApi(options: ApiOptions): Api {
     if (err instanceof HTTPException && err.status < 500) {
       // hono's own client errors (malformed JSON body, payload too large, ...) — their message describes the request.
       return c.json(errorBody(codeForStatus(err.status), err.message || 'Bad request', traceId), err.status as 400)
+    }
+    if (isCommitOutcomeUnknown(err)) {
+      // Not a plain 500: the write may be durable, and the client has to know that before it retries.
+      logger.error('commit outcome unknown', { method: c.req.method, path: c.req.path, ...describeError(err) })
+      return c.json(errorBody('COMMIT_OUTCOME_UNKNOWN', COMMIT_OUTCOME_UNKNOWN_MESSAGE, traceId), 503)
     }
     // Anything else is ours; the caller gets the trace id to quote.
     return internalError(c, logger, err)

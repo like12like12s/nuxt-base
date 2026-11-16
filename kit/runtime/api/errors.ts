@@ -5,10 +5,14 @@
 //   { "error": { "code": "NOT_FOUND", "message": "...", "details": [...], "traceId": "..." } }   (details optional)
 // Handlers throw an ApiError (helpers below); anything else that escapes a handler becomes a 500 whose body says
 // nothing about the cause — the cause goes to the log, next to the same traceId.
+//
+// One failure is neither: COMMIT_OUTCOME_UNKNOWN (503). The database connection failed while a write was being
+// committed, so the write MAY have been applied. A client must not simply send it again (a resource without a unique
+// key would get the record twice): read the current state first, then decide.
 import { z } from '@hono/zod-openapi'
 
 /** The fixed set. A client switches on `code`, never on `message`. */
-export const ERROR_CODES = ['VALIDATION', 'UNAUTHORIZED', 'FORBIDDEN', 'NOT_FOUND', 'CONFLICT', 'RATE_LIMITED', 'INTERNAL'] as const
+export const ERROR_CODES = ['VALIDATION', 'UNAUTHORIZED', 'FORBIDDEN', 'NOT_FOUND', 'CONFLICT', 'RATE_LIMITED', 'INTERNAL', 'COMMIT_OUTCOME_UNKNOWN'] as const
 export type ErrorCode = (typeof ERROR_CODES)[number]
 
 export const STATUS_OF = {
@@ -19,6 +23,7 @@ export const STATUS_OF = {
   CONFLICT: 409,
   RATE_LIMITED: 429,
   INTERNAL: 500,
+  COMMIT_OUTCOME_UNKNOWN: 503,
 } as const satisfies Record<ErrorCode, number>
 
 export type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 429 | 500 | 503
@@ -59,6 +64,11 @@ export const notFound = (what: string, id?: string) => new ApiError('NOT_FOUND',
 export const conflict = (message: string, details?: unknown[]) => new ApiError('CONFLICT', message, { details })
 export const rateLimited = (message = 'Too many requests') => new ApiError('RATE_LIMITED', message)
 
+export const COMMIT_OUTCOME_UNKNOWN_MESSAGE = 'The write may or may not have been applied: the database connection failed while it was being committed. Read the current state before sending it again.'
+/** The data layer's CommitOutcomeUnknownError (src/kit/db/resilient.ts), recognised by its code — this file imports nothing from the data layer. */
+export const isCommitOutcomeUnknown = (error: unknown): boolean =>
+  !!error && typeof error === 'object' && (error as { code?: unknown }).code === 'COMMIT_OUTCOME_UNKNOWN' && !(error instanceof ApiError)
+
 export function errorBody(code: ErrorCode, message: string, traceId: string, details?: unknown[]): ErrorBody {
   return { error: { code, message, ...(details?.length ? { details } : {}), traceId } }
 }
@@ -67,7 +77,7 @@ export function errorBody(code: ErrorCode, message: string, traceId: string, det
 export const ErrorSchema = z
   .object({
     error: z.object({
-      code: z.enum(ERROR_CODES),
+      code: z.enum(ERROR_CODES).describe('Switch on this, never on the message. COMMIT_OUTCOME_UNKNOWN (503): the write may have been applied — read the current state before sending it again.'),
       message: z.string(),
       details: z.array(z.unknown()).optional(),
       traceId: z.string(),
@@ -83,7 +93,7 @@ const DESCRIPTION: Record<number, string> = {
   409: 'Conflict',
   429: 'Rate limited',
   500: 'Internal error',
-  503: 'Not ready',
+  503: 'Not ready, or COMMIT_OUTCOME_UNKNOWN: the write may or may not have been applied',
 }
 
 /** `responses: { 200: ..., ...errorResponses(400, 404) }` — 500 is always included. */

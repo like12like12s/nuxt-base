@@ -10,7 +10,8 @@ import rootPkg from '../../package.json'
 import { API_V1, createApi, mountV1, openApiDocument, stringifyOpenApi } from '../runtime/api/app'
 import { buildInfo, commitFromTag } from '../runtime/api/build-info'
 import { currentActor, currentTraceId, getContext, parseTraceparent, resolveTraceId, runWithContext, setTraceIdProvider } from '../runtime/api/context'
-import { ApiError, ERROR_CODES, codeForStatus, conflict, errorBody, errorResponses, forbidden, notFound, rateLimited, unauthorized, validation } from '../runtime/api/errors'
+import { ApiError, ERROR_CODES, STATUS_OF, codeForStatus, conflict, errorBody, errorResponses, forbidden, notFound, rateLimited, unauthorized, validation } from '../runtime/api/errors'
+import { CommitOutcomeUnknownError } from '../runtime/db/resilient'
 import { CHECK_TIMEOUT_MS, HealthCheckError, runChecks, type HealthCheck } from '../runtime/api/health'
 import { KIT_VERSION } from '../runtime/api/kit-version'
 import { createLogger } from '../runtime/api/log'
@@ -119,7 +120,8 @@ describe('logger', () => {
 
 describe('errors', () => {
   it('the code set is fixed and every helper maps to its status', () => {
-    expect(ERROR_CODES).toEqual(['VALIDATION', 'UNAUTHORIZED', 'FORBIDDEN', 'NOT_FOUND', 'CONFLICT', 'RATE_LIMITED', 'INTERNAL'])
+    expect(ERROR_CODES).toEqual(['VALIDATION', 'UNAUTHORIZED', 'FORBIDDEN', 'NOT_FOUND', 'CONFLICT', 'RATE_LIMITED', 'INTERNAL', 'COMMIT_OUTCOME_UNKNOWN'])
+    expect(STATUS_OF.COMMIT_OUTCOME_UNKNOWN).toBe(503)
     const cases: [ApiError, string, number][] = [
       [validation('bad'), 'VALIDATION', 400], [unauthorized(), 'UNAUTHORIZED', 401], [forbidden(), 'FORBIDDEN', 403],
       [notFound('Item', 'x'), 'NOT_FOUND', 404], [conflict('dup'), 'CONFLICT', 409], [rateLimited(), 'RATE_LIMITED', 429],
@@ -300,6 +302,29 @@ describe('createApi', () => {
     expect(logged[0]).toMatchObject({ level: 'error', error: 'ER_NO_SUCH_TABLE: select * from secrets', path: '/t/500' })
     expect(logged[0]!.stack).toContain('runtime-api.spec')
     expect(lines.find((l) => l.msg === 'request' && l.path === '/t/500')).toMatchObject({ level: 'error', status: 500 })
+  })
+
+  // K-L2 (review 2): a COMMIT whose answer was lost reached the client as a plain 500 — it could not tell "maybe
+  // applied" from "failed", and a retry could write the record twice.
+  it('CommitOutcomeUnknownError from the data layer is a 503 COMMIT_OUTCOME_UNKNOWN in the error shape: says the write may have been applied, shows no cause', async () => {
+    const { app, api, lines } = setup()
+    app.post('/t/commit', () => { throw new CommitOutcomeUnknownError(Object.assign(new Error('read ECONNRESET at db-host:3306'), { code: 'ECONNRESET' })) })
+    const res = await api.post('/t/commit', {})
+    expect(res.status).toBe(503)
+    expect(Object.keys(res.body)).toEqual(['error'])
+    expect(Object.keys(res.body.error).sort()).toEqual(['code', 'message', 'traceId'])
+    expect(res.body.error).toMatchObject({ code: 'COMMIT_OUTCOME_UNKNOWN', traceId: res.traceId })
+    expect(res.body.error.message).toMatch(/may or may not have been applied/)
+    expect(res.body.error.message).toMatch(/Read the current state before sending it again/)
+    expect(JSON.stringify(res.body)).not.toMatch(/ECONNRESET|db-host|stack/)
+    const logged = lines.filter((l) => l.msg === 'commit outcome unknown' && l.traceId === res.traceId)
+    expect(logged).toHaveLength(1)
+    expect(logged[0]).toMatchObject({ level: 'error', path: '/t/commit', method: 'POST' })
+    // documented: the code is part of the Error schema of the contract, with what a client must do
+    const doc = (await api.get('/openapi.json')).body
+    const code = doc.components.schemas.Error.properties.error.properties.code
+    expect(code.enum).toContain('COMMIT_OUTCOME_UNKNOWN')
+    expect(code.description).toMatch(/COMMIT_OUTCOME_UNKNOWN \(503\): the write may have been applied/)
   })
 
   it('validates contract-first routes under /api/v1 and names the failing field', async () => {

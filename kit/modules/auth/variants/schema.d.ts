@@ -545,8 +545,11 @@ export interface components {
         };
         Error: {
             error: {
-                /** @enum {string} */
-                code: "VALIDATION" | "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "RATE_LIMITED" | "INTERNAL";
+                /**
+                 * @description Switch on this, never on the message. COMMIT_OUTCOME_UNKNOWN (503): the write may have been applied — read the current state before sending it again.
+                 * @enum {string}
+                 */
+                code: "VALIDATION" | "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "RATE_LIMITED" | "INTERNAL" | "COMMIT_OUTCOME_UNKNOWN";
                 message: string;
                 details?: unknown[];
                 traceId: string;

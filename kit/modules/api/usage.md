@@ -13,6 +13,10 @@ GET /openapi.json    the contract (same content as the committed openapi.json)
   `UNAUTHORIZED` `FORBIDDEN` `NOT_FOUND` `CONFLICT` `RATE_LIMITED` `INTERNAL`. Handlers `throw notFound('Item', id)` /
   `conflict(...)` / `validation(...)` (`src/kit/api/errors.ts`); anything else becomes a 500 that shows no cause.
   A 503 from `/health/ready` uses `INTERNAL` with the check list in `details`.
+  `COMMIT_OUTCOME_UNKNOWN` (503) is the one answer that is not a plain failure: the database connection failed while
+  a write was being committed, so the write **may have been applied**. A client must not blindly send it again —
+  read the record back (or list) first. Nothing in a handler is needed for it: `createApi()` maps the data layer's
+  `CommitOutcomeUnknownError` to this response, and the code is part of the `Error` schema in `openapi.json`.
 - Trace id: generated — or taken from `traceparent` when the caller is trusted to choose it (a request through the
   trusted proxy of the `auth` module, or every caller with `TRUST_TRACEPARENT=1` on an API only trusted clients
   reach); returned in `x-trace-id`; on every log line of the request
