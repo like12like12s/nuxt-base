@@ -99,4 +99,14 @@ describe('dogfood: the repo\'s own CI', () => {
     const script = readFileSync(join(KIT_ROOT, 'runtime/project/gate-ci.mjs'), 'utf8')
     for (const text of ["run('npm', ['run', 'gate'])", 'gitleaks', "['audit', '--audit-level=high']"]) expect(script).toContain(text)
   })
+
+  // K2 (review 2): the v0.3.0 release run was red because a spec that starts processes hit vitest's 5 s default on the runner.
+  it('no kit spec relies on the 5 s default timeout: the suite sets a generous one, the gitleaks test its own', () => {
+    const config = readFileSync(join(REPO, 'vitest.config.ts'), 'utf8')
+    const number = (key: string) => Number((new RegExp(`${key}:\\s*([\\d_]+)`).exec(config)?.[1] ?? '0').replaceAll('_', ''))
+    expect(number('testTimeout')).toBeGreaterThanOrEqual(30_000)
+    expect(number('hookTimeout')).toBeGreaterThanOrEqual(30_000)
+    const lockSpec = readFileSync(join(KIT_ROOT, 'tests/lock.spec.ts'), 'utf8')
+    expect(lockSpec).toMatch(/gitleaks detect` with the default config[^\n]*\{ timeout: 1[\d_]+ \}/)
+  })
 })

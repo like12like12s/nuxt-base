@@ -47,7 +47,8 @@ describe('.scaffold.json and secret scanners', () => {
 
   const hasGitleaks = !spawnSync('gitleaks', ['version'], { stdio: 'ignore' }).error
   if (!hasGitleaks) process.stderr.write('SKIPPED: gitleaks is not installed — the default-config scan of a fresh scaffold did not run (the kit gate and CI run it)\n')
-  it.skipIf(!hasGitleaks)('a fresh project passes `gitleaks protect --staged` and `gitleaks detect` with the default config — and the scan is real', () => {
+  // K2 (review 2): scaffold + git + three gitleaks runs took > 5 s on a CI runner — the timeout is explicit.
+  it.skipIf(!hasGitleaks)('a fresh project passes `gitleaks protect --staged` and `gitleaks detect` with the default config — and the scan is real', { timeout: 120_000 }, () => {
     const dir = project(FULL)
     // no repo config and no machine-wide one: the scanner's built-in rules
     const env = { ...process.env, GITLEAKS_CONFIG: '', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' }
