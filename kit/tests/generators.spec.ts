@@ -293,6 +293,20 @@ describe('add page — nested and dynamic paths', () => {
     expect(snapshot(dir)).toEqual(before) // nothing written: reports.vue is not turned into a parent route by accident
   })
 
+  // K-L3 (review 2): `x/[id]/[id]` was accepted — the router keeps one value for both segments.
+  it('a route that names a parameter twice is refused (exit 2, duplicate_param) and nothing is written', () => {
+    const dir = project(['--kind', 'nuxt-app'])
+    const before = snapshot(dir)
+    for (const path of ['orders/[id]/[id]', 'orders/[id]/lines/[id]', 'a/[x]/b/[y]/c/[x]']) {
+      const r = cli(['add', 'page', path, '--dir', dir, '--json'])
+      expect(r.status, path).toBe(2)
+      expect(r.json).toMatchObject({ ok: false, code: 'duplicate_param' })
+    }
+    expect(snapshot(dir)).toEqual(before)
+    // different names are fine
+    expect(cli(['add', 'page', 'orders/[orderId]/lines/[id]', '--dir', dir, '--json']).status).toBe(0)
+  })
+
   it('a page named like an existing directory becomes its index.vue (never a parent route next to it)', () => {
     const dir = project(['--kind', 'nuxt-app'])
     add(dir, 'page', 'reports/[id]')

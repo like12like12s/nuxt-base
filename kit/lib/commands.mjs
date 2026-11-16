@@ -215,6 +215,10 @@ export async function cmdAdd(kit, opts) {
   if (!name || !(isPage ? PAGE_PATH : NAME).test(name)) {
     throw usageError(`add ${type}: invalid name "${name ?? ''}" — ${isPage ? 'lowercase kebab-case segments separated by "/", a dynamic segment as [param] (reports, reports/monthly, reports/[id]); the first segment is never dynamic' : 'lowercase kebab-case'}`)
   }
+  // Two dynamic segments with one name (`x/[id]/[id]`): the router keeps one value, the page reads the wrong record.
+  const params = name.match(/\[[^\]]+\]/g) ?? []
+  const repeated = params.find((param, i) => params.indexOf(param) !== i)
+  if (repeated) throw usageError(`add ${type}: "${name}" names the route parameter ${repeated} twice — give each dynamic segment its own name (e.g. ${name.replace(repeated, '[parentId]')})`, 'duplicate_param')
   const reserved = (isPage ? name.split('/').filter((segment) => !segment.startsWith('[')) : [name]).map(reservedName).find(Boolean)
   if (reserved) throw usageError(`add ${type}: "${name}" cannot be used as a name — ${reserved}. Pick a more specific one (e.g. ${name}-${type === 'job' ? 'job' : type === 'page' ? 'page' : 'records'}).`, 'reserved_name')
   const dir = resolve(opts.dir ?? '.')
