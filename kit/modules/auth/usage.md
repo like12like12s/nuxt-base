@@ -19,7 +19,9 @@ forward-auth      identity headers added by the forward-auth proxy after the ide
 - `GET /api/v1/me` returns the caller (`subject`, `name`, `email`, `roles`, `kind`), 401 when nobody is signed in.
 - Service tokens (`service_tokens`: sha256 only, roles, expiry, `revokedAt`, `lastUsedAt`). A token created without
   `--roles` is authenticated and holds no role: it may call every `requireAuth()` route (reads) and no
-  `requireRole()` route — the token for a machine that only reads:
+  `requireRole()` route — the token for a machine that only reads. A token keeps the roles it was created with; a
+  role that is later removed from `src/auth/roles.ts` is **ignored** (the token still authenticates, and still holds
+  its other roles) — revoke and re-create the token if it should stop working altogether:
 
 ```bash
 npm run auth:token -- create --name nightly-sync --roles editor --days 90   # prints the token ONCE
@@ -60,7 +62,11 @@ under an identity header name or as `x-auth-proxy-secret`, and only when the req
 proxy does it pass the proxy's identity headers on and add the secret the API checks. The proxy itself needs no
 special configuration beyond forward-auth with the header preset above.
 
-A request whose identity headers are ambiguous (sent twice, or a
+The secret is added to **every** request that comes from the trusted proxy's address — also one without identity
+headers (a path the identity provider lets through unauthenticated): the secret says "this came through the proxy",
+the identity headers say who. Such a request is anonymous at the API, and it is treated as coming through the proxy
+(its `traceparent` and forwarded client address are believed). So `AUTH_BRIDGE_TRUSTED_PROXIES` must name the proxy
+only — never a range that other clients share. A request whose identity headers are ambiguous (sent twice, or a
 user name with a comma) gets neither identity nor secret. A header that means something else on every request
 (`Authorization`, `Cookie`, `X-Forwarded-For`, …) cannot be named as an identity header: the bridge then stays off
 and says so, as the API refuses to boot.

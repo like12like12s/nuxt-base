@@ -466,6 +466,22 @@ describe('who is believed', () => {
     expect(await t.db.selectFrom('users').select('id').execute()).toEqual([])
   })
 
+  // fix4 B7: what happens to a service token whose role was removed from the app — ruled: the role is ignored
+  it('a service token keeps working when one of its roles is no longer declared by the app: that role is ignored, the rest holds', async () => {
+    const t = await setup()
+    const seen: unknown[] = []
+    mountV1(t.app, (v1) => v1.openapi(route('get', '/whoami', requireAuth()), (c: any) => { seen.push(getContext()?.user?.roles); return c.json({ data: 'ok' }, 200) }))
+    const mixed = await createServiceToken(t.db, { name: 'mixed', roles: ['editor', 'auditor'] }) // `auditor` was a role once
+    const gone = await createServiceToken(t.db, { name: 'gone', roles: ['auditor'] })
+    const call = (token: string) => testClient(t.app, { headers: { authorization: `Bearer ${token}` } })
+    expect((await call(mixed.token).get('/api/v1/whoami')).status).toBe(200)
+    expect((await call(mixed.token).post('/api/v1/things', {})).status).toBe(200) // editor still counts
+    expect((await call(mixed.token).delete('/api/v1/things/1')).status).toBe(403)
+    expect((await call(gone.token).get('/api/v1/whoami')).status).toBe(200) // authenticated, like a token without roles
+    expect((await call(gone.token).post('/api/v1/things', {})).status).toBe(403)
+    expect(seen).toEqual([['editor'], []]) // the removed role is not carried into the request
+  })
+
   it('without proxy config the headers are never believed; service tokens still work', async () => {
     const t = await setup({ proxy: {} })
     expect(t.auth.describe()).toEqual({ mode: 'tokens-only', proxySecret: false, trustedProxies: 0 })

@@ -147,7 +147,9 @@ export function createAuth<R extends string>(options: AuthOptions<R>): Auth {
         logger?.warn('service token rejected', { reason: check.reason })
         throw unauthorized('Invalid or expired token')
       }
-      return { subject: `service:${check.token.id}`, name: check.token.name, roles: check.token.roles }
+      // Only roles the app still declares: a role that was removed from src/auth/roles.ts after the token was created
+      // is ignored (the token stays valid for what its other roles — or no role — allow).
+      return { subject: `service:${check.token.id}`, name: check.token.name, roles: check.token.roles.filter((role) => (roles as readonly string[]).includes(role)) }
     }
 
     const proxy = readProxy((name) => c.req.header(name), remoteAddress(c))
