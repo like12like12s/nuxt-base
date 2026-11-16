@@ -77,6 +77,16 @@ describe('lock — a job cannot overlap itself', () => {
     expect(readdirSync(dir).filter((f) => f.startsWith('broken'))).toEqual(['broken.lock.1'])
   })
 
+  it('an unreadable lock file is honoured for the grace period measured on the injected clock, then superseded', () => {
+    const dir = tmp('lock')
+    writeFileSync(join(dir, 'sync.lock.2'), '{"pid": 12') // another version's write in progress, or garbage
+    const t = Date.now()
+    expect(acquireLock(dir, 'sync', { ttlMs: 1000, now: () => t + 5_000 })).toBeNull()
+    const lock = acquireLock(dir, 'sync', { ttlMs: 1000, now: () => t + 11_000 }) // the real clock has not moved
+    expect(lock?.file).toBe(join(dir, 'sync.lock.3'))
+    expect(readdirSync(dir)).toEqual(['sync.lock.3'])
+  })
+
   it('a contender that finds a lock it did not judge backs off without touching it', () => {
     const dir = tmp('lock')
     // generation 7 appears between "list" and "confirm" of a contender that saw an empty directory: simulated by a
@@ -96,19 +106,22 @@ describe('lock — races between processes', () => {
   const CHILD = join(KIT_ROOT, 'tests', 'fixtures', 'lock-race.mjs')
   const DEAD_PID = 2 ** 22 + 12345 // above the kernel's pid_max: never a live process
 
-  async function round(prepare: (dir: string) => void, contenders = 12, holdMs = 400) {
+  async function round(prepare: (dir: string) => void, contenders = 12, holdMs = 400, churnMs = 0) {
     const dir = tmp('race')
     const log = join(dir, 'holders.log')
     prepare(dir)
     const at = Date.now() + 1200 // every child is up and spinning by then, also on a slow CI runner
     const exits = await Promise.all(Array.from({ length: contenders }, () => new Promise<number | null>((resolve) => {
-      const child = spawn(process.execPath, [CHILD, process.env.KIT_LOCK_MODULE ?? LOCK_MODULE, dir, String(at), log, String(holdMs)], { stdio: 'ignore' })
+      const child = spawn(process.execPath, [CHILD, process.env.KIT_LOCK_MODULE ?? LOCK_MODULE, dir, String(at), log, String(holdMs), churnMs ? 'churn' : 'once', String(churnMs)], { stdio: 'ignore' })
       child.on('close', (code) => resolve(code))
     })))
     expect(exits.every((code) => code === 0), `child exit codes ${exits.join(',')}`).toBe(true)
     const holders = existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').map((line) => line.split(' ').map(Number)) : []
-    const overlapping = holders.filter(([pid, from, to]) => holders.some(([other, f, t]) => other !== pid && f! < to! && from! < t!)).length
-    return { holders: holders.length, overlapping, left: readdirSync(dir).filter((f) => f !== 'holders.log') }
+    // two ways to see an overlap: the hold intervals (clear with the long holds of the one-shot rounds), and the
+    // exclusive witness file a holder creates — exact also when holds are a few ms and clocks differ per process
+    const byTime = holders.filter(([pid, from, to]) => holders.some(([other, f, t]) => other !== pid && f! < to! && from! < t!)).length
+    const witnessed = existsSync(`${log}.overlap`) ? readFileSync(`${log}.overlap`, 'utf8').trim().split('\n').length : 0
+    return { holders: holders.length, overlapping: churnMs ? witnessed : Math.max(byTime, witnessed), late: existsSync(`${log}.late`), left: readdirSync(dir).filter((f) => !f.startsWith('holders.log')) }
   }
 
   it('a stale lock (dead owner) is taken over by exactly one of 12 simultaneous starts', async () => {
@@ -128,6 +141,33 @@ describe('lock — races between processes', () => {
     expect(rounds.map((r) => r.overlapping)).toEqual([0, 0, 0, 0])
     expect(rounds.every((r) => r.holders >= 1 && r.holders <= 2), JSON.stringify(rounds.map((r) => r.holders))).toBe(true)
     expect(rounds.flatMap((r) => r.left)).toEqual([])
+  }, 60_000)
+
+  // K3 (review 2): with the stale lock at generation 0 every contender aims at generation 1 and link() alone decides.
+  // At generation N >= 1 a contender whose listing raced with the takeover (it saw `race.lock.N`, could no longer
+  // read it, and so believes the directory is empty) aims at generation 1 while the winner sits at N + 1: only the
+  // confirm step (list again, back off on anything not judged) stops a second holder. Removing that block from
+  // runtime/jobs/lock.ts makes these two tests fail (KIT_LOCK_MODULE=<mutated copy> — proven in the fix4 report).
+  it('a stale lock at generation N >= 1 is taken over by one of 16 simultaneous starts — never two at once', async () => {
+    const stale = JSON.stringify({ pid: DEAD_PID, host: hostname(), startedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 600_000).toISOString() })
+    const rounds = []
+    for (const generation of [1, 3, 3, 7, 7, 12, 12, 40]) rounds.push(await round((dir) => writeFileSync(join(dir, `race.lock.${generation}`), stale), 16))
+    expect(rounds.map((r) => r.overlapping)).toEqual([0, 0, 0, 0, 0, 0, 0, 0])
+    expect(rounds.every((r) => r.holders >= 1 && r.holders <= 2), JSON.stringify(rounds.map((r) => r.holders))).toBe(true)
+    expect(rounds.flatMap((r) => r.left)).toEqual([])
+  }, 120_000)
+
+  it('churn: 12 processes take, release and abandon the lock for 2.5 s — stale locks at rising generations, no two holders at once', async () => {
+    const stale = JSON.stringify({ pid: DEAD_PID, host: hostname(), startedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 600_000).toISOString() })
+    let result = await round((dir) => writeFileSync(join(dir, 'race.lock.3'), stale), 12, 2, 2500)
+    // a round in which a process was paused past its own 30 ms deadline while taking the lock proves nothing: again
+    for (let again = 0; result.late && again < 3; again++) result = await round((dir) => writeFileSync(join(dir, 'race.lock.3'), stale), 12, 2, 2500)
+    expect(result.late, 'no round without a paused contender in 4 tries — the machine is too busy for this test').toBe(false)
+    expect(result.overlapping).toBe(0)
+    expect(result.holders).toBeGreaterThan(20) // it did churn
+    // what is left is at most the last abandoned (expired) lock, at a generation well past the first ones
+    expect(result.left.every((file) => /^race\.lock\.\d+$/.test(file)), result.left.join(',')).toBe(true)
+    expect(result.left.length).toBeLessThanOrEqual(1)
   }, 60_000)
 })
 

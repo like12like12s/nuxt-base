@@ -95,7 +95,7 @@ export function acquireLock(dir: string, name: string, options: LockOptions): Jo
   const { ttlMs, now = Date.now, pid = process.pid, host = hostname(), isAlive = alive, graceMs = 10_000 } = options
   mkdirSync(dir, { recursive: true })
   const stale = (entry: Entry): boolean => {
-    if (!entry.info) return Date.now() - entry.mtimeMs > graceMs // unreadable: stale only once nobody can still be writing it
+    if (!entry.info) return now() - entry.mtimeMs > graceMs // unreadable: stale only once nobody can still be writing it
     return !(Date.parse(entry.info.expiresAt) > now()) || (entry.info.host === host && !isAlive(entry.info.pid))
   }
 
@@ -116,23 +116,34 @@ export function acquireLock(dir: string, name: string, options: LockOptions): Jo
     rmSync(temp, { force: true })
   }
 
+  // Our own file is only ever removed while it still holds our record: once our deadline has passed, a later run may
+  // have superseded the file and the name been taken again.
+  const removeOwn = (): void => {
+    try {
+      if ((JSON.parse(readFileSync(file, 'utf8')) as LockInfo).nonce === nonce) rmSync(file, { force: true })
+    } catch {
+      /* already gone */
+    }
+  }
+
   // Confirm: nothing but what we judged stale (same file, same content) and our own file may be there.
   const judged = new Set(before.map((entry) => `${entry.file}\n${entry.raw}`))
   if (entries(dir, name).some((entry) => entry.file !== file && !judged.has(`${entry.file}\n${entry.raw}`))) {
-    rmSync(file, { force: true })
+    removeOwn()
     return null
   }
-  for (const entry of before) rmSync(entry.file, { force: true }) // superseded
+  // Superseded — but only the very record we judged: after a release the generations start again at 1, so the same
+  // file NAME can by now be somebody's live lock (possible once our own deadline has passed while we were still here).
+  for (const entry of before) {
+    try {
+      if (readFileSync(entry.file, 'utf8') === entry.raw) rmSync(entry.file, { force: true })
+    } catch {
+      /* already gone */
+    }
+  }
 
   return {
     file,
-    release() {
-      try {
-        // Only our own record: after our deadline a later run may have superseded this file and the name been reused.
-        if ((JSON.parse(readFileSync(file, 'utf8')) as LockInfo).nonce === nonce) rmSync(file, { force: true })
-      } catch {
-        /* already gone */
-      }
-    },
+    release: removeOwn,
   }
 }
