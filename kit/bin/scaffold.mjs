@@ -15,7 +15,7 @@ const USAGE = `usage:
   scaffold check [<dir>] [--json]      exit 0 clean, 1 drift (names the kit version + commit it compared against)
   scaffold update [<dir>] [--json]     re-copy locked files + bump the layer tag; prints the by-hand notes of UPGRADING.md
   scaffold list [--json]
-exit codes: 0 ok, 1 drift (check), 2 usage, 3 target dir not empty, 4 unknown/incompatible kind, module or preset,\n            70 internal error (a kit bug — never reported as drift)`
+exit codes: 0 ok, 1 drift (check), 2 usage, 3 target dir not empty, 4 unknown/incompatible kind, module or preset\n            (also: update of a project that is at a newer kit),\n            70 internal error (a kit bug — never reported as drift)`
 
 function port(value, flag) {
   if (value === undefined) return undefined

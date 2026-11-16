@@ -8,7 +8,7 @@ import { bareHash, inside, isEmptyOrMissing, pathExists, readJson, sha256, symli
 import { GENERATOR_TYPES, LAYER_REPO, isBehind } from './kit.mjs'
 import { reservedName } from './names.mjs'
 import { kitSource } from './source.mjs'
-import { upgradeNotes } from './upgrading.mjs'
+import { compareVersions, upgradeNotes } from './upgrading.mjs'
 
 const MANIFEST = '.scaffold.json'
 const NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/
@@ -140,6 +140,12 @@ export function cmdCheck(kit, opts) {
 // Re-copy locked files from the current kit and bump the layer tag. App-owned files are never touched, nothing is deleted.
 export function cmdUpdate(kit, opts) {
   const dir = resolve(opts.dir ?? '.')
+  // Never downgrade: a project generated (or updated) by a NEWER kit would get this kit's older locked files — fixes
+  // silently undone — and still report ok. Refused before anything is read or written.
+  const projectKit = readManifest(dir).kit ?? null
+  if (/^\d+\.\d+\.\d+$/.test(projectKit ?? '') && compareVersions(projectKit, kit.version) > 0) {
+    throw incompatible('kit_older', `update: ${dir} is at kit ${projectKit}, this kit is ${kit.version} — an older kit never updates a newer project (it would downgrade its locked files). Run the update with kit ${projectKit} or newer.`)
+  }
   const { manifest, plan, drift, unreleased, layer, fromConfig, source, warnings } = diff(kit, dir)
   const updated = []
   const orphaned = []

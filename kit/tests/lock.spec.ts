@@ -148,6 +148,37 @@ describe('check', () => {
 })
 
 describe('update', () => {
+  // K-L1 (review 2): the v0.2.0 kit run on a v0.3.0 project re-copied 25 locked files (fixes undone) and said ok.
+  it('refuses a project whose kit version is newer than the running kit (exit 4, kit_older) and writes nothing', () => {
+    const dir = project(['--kind', 'fullstack', '--deploy', 'container'])
+    const file = join(dir, '.scaffold.json')
+    const manifest = JSON.parse(readFileSync(file, 'utf8'))
+    const current = manifest.kit as string
+    const [major, minor, patch] = current.split('.').map(Number)
+    appendFileSync(join(dir, 'api/src/kit/api/env.ts'), '\n// a newer kit wrote this\n')
+    for (const newer of [`${major}.${minor}.${patch! + 1}`, `${major}.${minor! + 1}.0`, `${major! + 1}.0.0`, '9.9.9']) {
+      writeFileSync(file, JSON.stringify({ ...manifest, kit: newer }, null, 2) + '\n')
+      const before = snapshot(dir)
+      const r = cli(['update', dir, '--json'])
+      expect(r.status, newer).toBe(4)
+      expect(r.json).toMatchObject({ ok: false, code: 'kit_older' })
+      expect(r.json.message).toContain(`is at kit ${newer}, this kit is ${current}`)
+      expect(snapshot(dir)).toEqual(before)
+    }
+    // text form: the message on stderr, same exit code
+    const plain = cli(['update', dir])
+    expect(plain.status).toBe(4)
+    expect(plain.stderr).toContain('an older kit never updates a newer project')
+    // semver, not string order: 0.10.0 is newer than 0.9.0 — and the same or an older version updates as before
+    const kit = cloneKit('0.9.0')
+    writeFileSync(file, JSON.stringify({ ...manifest, kit: '0.10.0' }, null, 2) + '\n')
+    expect(cli(['update', dir, '--json'], { kit }).json).toMatchObject({ ok: false, code: 'kit_older' })
+    writeFileSync(file, JSON.stringify({ ...manifest, kit: '0.9.0' }, null, 2) + '\n')
+    expect(cli(['update', dir, '--json'], { kit }).status).toBe(0)
+    writeFileSync(file, JSON.stringify({ ...manifest, kit: '0.2.0' }, null, 2) + '\n')
+    expect(cli(['update', dir, '--json'], { kit }).status).toBe(0)
+  })
+
   it('restores edited and missing locked files and leaves app-owned files alone', () => {
     const dir = project(['--kind', 'fullstack', '--deploy', 'container'])
     const before = snapshot(dir)
