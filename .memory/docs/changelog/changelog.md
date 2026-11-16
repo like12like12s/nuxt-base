@@ -4,6 +4,17 @@ description: Change history of nuxt-base (newest first)
 ---
 # nuxt-base — Changelog
 
+### v0.3.0 — kit after review + first real use (epic t1092)
+- Tag v0.3.0 = fix round 1 (t1106) + fix round 2 (t1112) · `kit/UPGRADING.md` section `0.2.0 -> 0.3.0` lists the by-hand steps; `scaffold update` prints them
+
+### t1112 — fix round 2: findings from the reference app kit-ref (t1096)
+- Auth behind a forward-auth proxy (#1, 6d515c8): identity header names configurable (`AUTH_HEADER_PRESET`, incl. the Remote-* preset); the fullstack UI's `/api` proxy carries the bridge — forwards identity + proxy secret only for the trusted proxy peer, strips them otherwise (spoofing with the real secret from another peer = 401 on the built app)
+- `.scaffold.json` hashes are `sha256:<hex>` so a fresh scaffold passes gitleaks (#2); kit gate commits every combo through gitleaks
+- Generators (#3 #4): list page retry fixed; `add resource` → `<name>/index.vue` + `[id].vue` with create/edit/soft-delete forms and per-field 400 details; `add page` takes nested/dynamic paths
+- New flags: `--no-sample` (#13), `--lang th|en` (#15, default th; layer labels follow `nuxtBase.lang`) · role-less service tokens (#5) · og + auth reads records with a service token (#6) · `/version` reports commit + builtAt in images (#11) · fullstack container API publishes no host port, `services[].internal` (#14) · e2e ports derive from the project's ports (#17) · scanner findings in locked files fixed, `npm audit` moderate = 0 in a fresh scaffold (#12) · title derived, one brief at `.memory/docs/brief/brief.md` (#10) · `# kit:generated KEY` line in docker/env.example for secrets created on the host
+- `check` reports `state: clean | drift | kit-unreleased` with the kit commit (#7 #18); unreleased kit work is not project drift
+- Tests: gate 549 unit (5 MySQL-only skipped) + 4 e2e · `gate:kit` 21 combos
+
 ### t1106 — review fix round 1 (review t1097: High 3, Medium 14, Low 19; epic t1092)
 - H1 (29f0f55): a COMMIT whose acknowledgement is lost is never replayed — error `COMMIT_OUTCOME_UNKNOWN` (before: write + audit applied twice) · H2 (a1d9ff0): SQLite pre-migrate backup = `VACUUM INTO` + `integrity_check`, a failed backup refuses the migration (exit 3) · H3 (8c94d06, a253a0f): job lock by atomic `link()` per generation — 12-process race test, 1 holder every round
 - M1/M2/M14 (fae1a0a): `--context`, title, description validated (hostile values refused; stored answers of existing projects only warn); no `container_name` in compose templates (two stages on one host); generated README + `next[]` say the repo must stay private · M3 (523f12d): CI runs gitleaks for real, `npm ci`, actions pinned by SHA · M4/M13 (0e28974): rate limit per client only through the trusted proxy (fullstack default off); auth fail-closed on every path, declaration must be the first handler · M5 (f8d3022): og URLs only from `NUXT_PUBLIC_SITE_URL` · M6/M7 (21324e0): MySQL timeout kills the server-side query; SQLite lock waits no longer block the event loop · M8 (42b0c7e): live-unique via generated column + UNIQUE index, duplicate → 409
