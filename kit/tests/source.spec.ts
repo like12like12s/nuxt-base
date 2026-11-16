@@ -179,6 +179,37 @@ describe('UPGRADING.md and the notes `update` prints', () => {
     for (const item of first.items) expect(item.length, item).toBeGreaterThan(40)
   })
 
+  // fix4 B: the reference app's 0.2.0 -> 0.3.0 update needed things the section did not say, and two notes sent the
+  // reader to "a freshly scaffolded project". Every gap found there is a note now, and no note needs a second project.
+  it('the 0.2.0 -> 0.3.0 step is complete without a fresh scaffold, and 0.3.0 -> next lists this round\'s by-hand changes', () => {
+    const text = readFileSync(join(KIT_ROOT, 'UPGRADING.md'), 'utf8')
+    const sections = parseUpgrading(text)
+    const step = sections.find((s: any) => s.from === '0.2.0').items.join('\n')
+    for (const topic of [
+      'API_URL: http://api:3000', // B1
+      'npm run contract', 'npm run client', "TRUST_TRACEPARENT: '1'", 'api/tests/trace.spec.ts', // B2
+      'RATE_LIMIT_MAX=0', 'trustHost: import.meta.dev', "'x-frame-options': 'DENY'", '[ \\"$npm_command\\" = ci ] && c=ci', 'ui/tests/unit/auth-bridge.spec.ts', "publicRoute(), () =>", // B3
+      'KEEP the entries', '<commit>:.scaffold.json:generic-api-key:<line>', // B4
+    ]) expect(step, topic).toContain(topic)
+    expect(step).not.toMatch(/fresh(ly)? scaffold/i)
+    expect(step).toContain('scaffold update --show')
+    expect(text).toContain('scaffold update --show api/src/app.ts | diff - api/src/app.ts')
+    const next = sections.find((s: any) => s.from === '0.3.0' && s.to === 'next')
+    expect(next).toBeDefined()
+    for (const topic of ['COMMIT_OUTCOME_UNKNOWN', 'event.node.req.rawHeaders', 'ambiguous-identity', 'entries that are there stay', 'gitleaks protect']) expect(next.items.join('\n'), topic).toContain(topic)
+  })
+
+  // … and every file a note tells the owner to create with `update --show` is one the kit really generates.
+  it('every `scaffold update --show <path>` in UPGRADING.md names a file of a full fullstack project', () => {
+    const dir = join(tmp('upgrading-show'), 'app')
+    expect(cli(['new', 'demo-app', '--kind', 'fullstack', '--with', 'db,auth,api,trace,og,security,jobs,notify', '--deploy', 'container', '--dir', dir, '--json']).status).toBe(0)
+    const paths = [...new Set([...readFileSync(join(KIT_ROOT, 'UPGRADING.md'), 'utf8').matchAll(/scaffold update --show ([\w./[\]-]+\.\w+)/g)].map((m) => m[1]!))]
+    expect(paths.length).toBeGreaterThanOrEqual(5)
+    for (const path of paths) expect(cli(['update', dir, '--show', path, '--json']).json, path).toMatchObject({ ok: true, path })
+    // the short forms `scaffold update --show <a>` / `<b>` in one sentence
+    for (const path of ['api/tests/trace.spec.ts', 'ui/tests/unit/server-api.spec.ts', 'ui/tests/unit/api-error.spec.ts']) expect(cli(['update', dir, '--show', path, '--json']).json.ok, path).toBe(true)
+  })
+
   it('a v0.2.0 project updated by this kit is told the 0.2.0 steps (once the kit is past 0.2.0)', () => {
     const kit = cloneKit('0.3.0') // an exported release after 0.2.0, with this repository's UPGRADING.md
     const dir = project(cloneKit('0.2.0'))

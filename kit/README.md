@@ -20,6 +20,8 @@ node <KIT>/bin/scaffold.mjs add resource|page|job <name> [--og] [--dir <project>
                                     resource --og: also list the detail page for link previews — opt-in)
 node <KIT>/bin/scaffold.mjs check [<dir>] [--json]     exit 0 clean · 1 drift
 node <KIT>/bin/scaffold.mjs update [<dir>] [--json]    re-copy locked files + bump the layer tag
+node <KIT>/bin/scaffold.mjs update [<dir>] --show <path> [--json]
+                                   print one file as this kit generates it for this project — writes nothing
 node <KIT>/bin/scaffold.mjs list [--json]              kinds, modules, deploy presets, kitVersion
 ```
 
@@ -56,6 +58,8 @@ check   { ok, dir, clean, state: "clean"|"drift"|"kit-unreleased",
           unreleased[{ path, reason: "outdated"|"new-in-kit"|"removed-from-kit" }], warnings[] }
 update  { ok, dir, kit: { from, to, commit, unreleased, note? }, updated[], orphaned[],
           layer: { from, to, file } | null, notes[{ from, to, items[] }], warnings[] }
+update --show   { ok, dir, path, owner: "app"|"kit", kit: { project, current, commit, unreleased, note? }, content }
+                (without --json: the file itself on stdout, byte for byte; unknown path = exit 2, code `unknown_file`)
 list    { ok, kitVersion, layerRef, kinds[{ name, description, parts[{ type, dir }] }],
           modules[{ name, status: "ready"|"planned", implicit, kinds[], requires[], generators[], description }],
           deploy[{ name, kinds[], description }], generators[] }
@@ -158,6 +162,11 @@ therefore drift even though the manifest still records the new one.
 rewrites `.scaffold.json`. It never touches an app-owned file and never deletes: a file the kit dropped is reported as
 `orphaned` and left in place; a layer ref it cannot find in `nuxt.config.ts` is a warning, and `check` keeps failing.
 It does not change `package.json` — dependency bumps stay a deliberate, reviewed change.
+
+`update --show <path>` is the read-only companion of the upgrade notes: it prints a file — app-owned or locked — as
+this kit generates it for this project (its kind, modules and stored answers), so the current form of a file that
+`update` never rewrites can be diffed against the project's own (`scaffold update --show api/src/app.ts | diff -
+api/src/app.ts`) or written where it does not exist yet. Files that `add` generated are not part of it.
 
 `update` never downgrades: when the project's manifest names a kit version newer than the running kit (semver
 compare of `kit` in `.scaffold.json` with the kit's version) it stops with exit 4 / code `kit_older` before reading
@@ -331,7 +340,11 @@ in ONE place, `.memory/docs/brief/brief.md` — the README links to it; there is
 that the repository must stay private: the answers, `docker/` and the env examples record deployment details. `gate` is typecheck → lint
 (`oxlint --deny-warnings`, build output ignored through `.oxlintrc.json`) → unit tests. `gate:ci` (locked
 `scripts/gate-ci.mjs`) = gate + `gitleaks` (absent binary: a visible `NOTICE … SKIPPED` locally, a failure when `CI`
-is set) + `npm audit --audit-level=high` in every directory that has a lockfile. `--with ci-github` adds a workflow
+is set) + `npm audit --audit-level=high` in every directory that has a lockfile. The secret scan covers the whole
+git history (`gitleaks detect`) and — on a developer machine, not in CI — what is not committed yet (`gitleaks
+protect`); a pre-commit hook (`gitleaks protect --staged`) sees only what is about to be committed, so a green
+local gate:ci implies a green hook, never the other way round. All modes share the rules and `.gitleaksignore`; a
+false positive in an old commit stays ignored there by its fingerprint (see UPGRADING.md, 0.2.0 -> 0.3.0). `--with ci-github` adds a workflow
 running it: `npm ci`, actions pinned by commit SHA, gitleaks installed from a pinned release with its checksum.
 
 ## Modules: api · db · testkit
