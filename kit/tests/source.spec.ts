@@ -194,7 +194,7 @@ describe('UPGRADING.md and the notes `update` prints', () => {
     expect(step).not.toMatch(/fresh(ly)? scaffold/i)
     expect(step).toContain('scaffold update --show')
     expect(text).toContain('scaffold update --show api/src/app.ts | diff - api/src/app.ts')
-    const next = sections.find((s: any) => s.from === '0.3.0' && s.to === 'next')
+    const next = sections.find((s: any) => s.from === '0.3.0') // 'next' until the release renames the heading
     expect(next).toBeDefined()
     for (const topic of ['COMMIT_OUTCOME_UNKNOWN', 'event.node.req.rawHeaders', 'ambiguous-identity', 'entries that are there stay', 'gitleaks protect']) expect(next.items.join('\n'), topic).toContain(topic)
   })

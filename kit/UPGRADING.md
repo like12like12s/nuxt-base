@@ -16,7 +16,7 @@ scaffold update --show api/src/app.ts | diff - api/src/app.ts   # what differs f
 scaffold update --show ui/tests/unit/auth-bridge.spec.ts > ui/tests/unit/auth-bridge.spec.ts   # a file you do not have yet
 ```
 
-## 0.3.0 -> next
+## 0.3.0 -> 0.4.0
 
 - `api/openapi.json` and `ui/app/api/schema.d.ts` (after every `scaffold update`, this one included): run
   `npm run contract` in the API directory, then `npm run client` in `ui/` (fullstack), and commit both files. This
