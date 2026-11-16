@@ -7,7 +7,7 @@ crosses (`notes[]` with `--json`). Do them, then run the project's `npm run gate
 Format (parsed by `kit/lib/upgrading.mjs`): `## <from> -> <to>`, `<to>` = the next released version, or `next` while
 it is not released. One top-level bullet per change; start it with the file. Newest step first.
 
-## 0.2.0 -> next
+## 0.2.0 -> 0.3.0
 
 - `api/src/app.ts` (auth): mount the auth middleware on every path — `api.use('*', auth.middleware)` instead of
   `/api/v1/*` — and keep each route's `publicRoute()` / `requireAuth()` / `requireRole()` as its FIRST middleware; a
