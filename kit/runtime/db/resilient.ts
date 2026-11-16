@@ -12,6 +12,8 @@
 // Inside a transaction nothing is replayed statement by statement: the transaction is gone (or half applied), so the
 // whole unit has to run again — that is what withTransaction() in repo.ts does. Everything else (constraint
 // violations, syntax errors, a query timeout) fails at once.
+// A query timeout inside a transaction is final too: the unit ran once, the caller gets QUERY_TIMEOUT (the ROLLBACK
+// that follows on the destroyed connection fails, and that failure is dropped — see rollbackTransaction).
 //
 // COMMIT is the one statement that is never transient: once it was sent and the answer did not come back (socket
 // reset, timeout, closed connection), the transaction may be durable. The unit is NOT replayed — the caller gets
@@ -197,6 +199,13 @@ class ResilientDriver implements Driver {
     }
     try {
       await this.inner.rollbackTransaction(c.inner)
+    } catch (error) {
+      // ROLLBACK on a connection that is already gone (a query timeout destroyed it, the server dropped it): the
+      // transaction died with the connection, there is nothing to undo — and this error must not replace the one
+      // that caused the rollback (Kysely rethrows that one), or a QUERY_TIMEOUT would read as "connection closed"
+      // and the whole unit be replayed. Any other ROLLBACK failure is real and is thrown.
+      const kind = transientKind(error)
+      if (kind !== 'unsent' && kind !== 'connection') throw error
     } finally {
       c.inTransaction = false
     }

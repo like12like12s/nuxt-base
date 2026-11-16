@@ -450,6 +450,30 @@ describe('transient errors — what is retried and what is not', () => {
       expect(await t.count()).toBe(2)
     })
 
+    // K1 (review 2): the timeout destroys the connection, so the ROLLBACK Kysely sends next fails with mysql2's
+    // "closed state" message — which replaced the QUERY_TIMEOUT and, being `unsent`, replayed the whole unit 3 times.
+    it('a QUERY_TIMEOUT inside a transaction: the unit runs once and the caller gets QUERY_TIMEOUT, not the failed ROLLBACK', async () => {
+      const t = await flakyDb(dialect)
+      t.f.failQuery(/update .things./i, () => fault({ name: 'DbTimeoutError', code: 'QUERY_TIMEOUT' }, 'query exceeded 300 ms'))
+      t.f.failQuery(/^rollback$/i, CLOSED, 5)
+      let runs = 0
+      const outcome = await withTransaction(t.db, async (trx) => {
+        runs++
+        await trx.insertInto('things').values({ ...created(), name: `run ${runs}`, count: 0 }).execute()
+        await trx.updateTable('things').set({ count: 5 }).execute()
+      }, { backoffMs: 1 }).then(() => 'ok', (e: Error) => e)
+      expect(outcome).toMatchObject({ code: 'QUERY_TIMEOUT', message: 'query exceeded 300 ms' })
+      expect(runs).toBe(1)
+      expect(t.events).toEqual([])
+      expect(t.f.sent.filter((s) => /update .things./i.test(s))).toHaveLength(1)
+    })
+
+    it('a ROLLBACK that fails for another reason than a dead connection is not hidden', async () => {
+      const t = await flakyDb(dialect)
+      t.f.failQuery(/^rollback$/i, () => fault({ errno: 1064, code: 'ER_PARSE_ERROR' }, 'rollback refused'))
+      await expect(t.db.transaction().execute(async () => { throw new Error('unit failed') })).rejects.toMatchObject({ message: 'rollback refused' })
+    })
+
     it('a COMMIT the database itself refused (deadlock) is known to have failed: the unit is replayed', async () => {
       const t = await flakyDb(dialect)
       t.f.failQuery(/^commit$/i, DEADLOCK)
@@ -753,6 +777,26 @@ describe.skipIf(!MYSQL)('MySQL: timeouts and dropped connections', () => {
     expect((await database.db.selectFrom('things').select('count').where('id', '=', row.id).executeTakeFirstOrThrow()).count).toBe(0)
     const running = await sql<{ n: number }>`select count(*) as n from information_schema.processlist where info like ${'update things set count = count + 1 + sleep%'}`.execute(database.db)
     expect(Number(running.rows[0]!.n)).toBe(0)
+  })
+
+  // K1 (review 2), on the real server: the statement is killed, the connection destroyed, the ROLLBACK cannot be sent.
+  it('a statement that passes its deadline inside withTransaction(): the body runs once, the caller gets QUERY_TIMEOUT, nothing is written', async () => {
+    const events: RetryEvent[] = []
+    const database = await testDb({ dialect: 'mysql', migrations, options: { poolMax: 2, queryTimeoutMs: 300, retries: 2, backoffMs: 5, onRetry: (e) => events.push(e) } })
+    let runs = 0
+    const started = Date.now()
+    const outcome = await withTransaction(database.db, async (trx) => {
+      runs++
+      await trx.insertInto('things').values({ ...created(), name: `run ${runs}`, count: 0 }).execute()
+      await sql`select sleep(5)`.execute(trx)
+    }).then(() => 'ok', (e: Error) => e)
+    expect(outcome).toMatchObject({ name: 'DbTimeoutError', code: 'QUERY_TIMEOUT' })
+    expect(runs).toBe(1)
+    expect(events).toEqual([])
+    expect(Date.now() - started).toBeLessThan(2000)
+    // the insert of the abandoned transaction was rolled back by the server, and the pool still works
+    expect(await database.db.selectFrom('things').select('name').execute()).toEqual([])
+    await database.ping()
   })
 
   it('a real lock wait timeout between two sessions is retried, then surfaces', async () => {
