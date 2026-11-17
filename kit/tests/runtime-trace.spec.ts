@@ -78,7 +78,7 @@ describe('on — spans reach the collector', () => {
   it('one SERVER span per request; span, x-trace-id and the log line carry the same trace id', async () => {
     const otlp = await tracing()
     const { api, lines } = app()
-    const res = await api.get('/api/v1/things/42?token=abc')
+    const res = await api.get('/api/v1/things/42?token=zz-secret-zz')
     expect(res.status).toBe(200)
     expect(res.traceId).toMatch(HEX32)
     await flushTracing()
@@ -93,7 +93,7 @@ describe('on — spans reach the collector', () => {
       service: 'svc-api',
       attributes: { 'http.request.method': 'GET', 'http.route': '/api/v1/things/:id', 'http.response.status_code': 200 }, // L16: no raw url.path (it can carry a token)
     })
-    expect(JSON.stringify(spans)).not.toContain('abc') // no query string in a span either
+    expect(JSON.stringify(spans)).not.toContain('zz-secret-zz') // no query string in a span either (non-hex marker: can never appear inside the random hex trace id)
     const logged = lines.filter((l) => l.msg === 'request')
     expect(logged).toHaveLength(1)
     expect(logged[0]!.traceId).toBe(res.traceId)

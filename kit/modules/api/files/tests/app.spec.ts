@@ -35,13 +35,13 @@ describe('health and version', () => {
 describe('trace id and request log', () => {
   it('generates a trace id, returns it in x-trace-id and logs it', async () => {
     const { api, lines } = t.build()
-    const res = await api.get('/health/live?token=abc')
+    const res = await api.get('/health/live?token=zz-secret-zz')
     expect(res.traceId).toMatch(TRACE_ID)
     const requests = lines.filter((line) => line.msg === 'request') // one line per request
     expect(requests).toHaveLength(1)
     expect(Object.keys(requests[0]!).sort()).toEqual(['env', 'level', 'method', 'ms', 'msg', 'path', 'service', 'status', 'traceId', 'ts'])
     expect(requests[0]).toMatchObject({ level: 'info', msg: 'request', service: SERVICE, env: 'test', traceId: res.traceId, method: 'GET', path: '/health/live', status: 200 })
-    expect(JSON.stringify(lines)).not.toContain('abc') // the query string may carry tokens
+    expect(JSON.stringify(lines)).not.toContain('zz-secret-zz') // the query string may carry tokens (marker is non-hex: it can never appear inside the random hex trace id)
   })
 
   it('a caller does not choose the trace id: traceparent is continued only with TRUST_TRACEPARENT=1 (or through the trusted proxy)', async () => {

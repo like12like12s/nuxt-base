@@ -16,6 +16,15 @@ scaffold update --show api/src/app.ts | diff - api/src/app.ts   # what differs f
 scaffold update --show ui/tests/unit/auth-bridge.spec.ts > ui/tests/unit/auth-bridge.spec.ts   # a file you do not have yet
 ```
 
+## 0.4.0 -> next
+
+- `api/tests/app.spec.ts` (kind `api` and fullstack): the query-string marker in the request-log test is now
+  `zz-secret-zz` instead of `abc`. The assertion `expect(...).not.toContain(...)` runs on a log line that also
+  carries the random hex trace id — an `abc` marker matched a trace id containing `abc` (~0.7% of ids) and made the
+  test flaky. Take the file over with
+  `scaffold update --show api/tests/app.spec.ts > api/tests/app.spec.ts` unless you changed it (a manual edit of the
+  marker in the `token=` request and the `not.toContain` line is enough if you did).
+
 ## 0.3.0 -> 0.4.0
 
 - `api/openapi.json` and `ui/app/api/schema.d.ts` (after every `scaffold update`, this one included): run

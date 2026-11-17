@@ -27,10 +27,10 @@ describe('app', () => {
 
   it('writes one JSON log line per request, without the query string', async () => {
     const { app, lines } = setup()
-    await app.request('/health/live?token=abc')
+    await app.request('/health/live?token=zz-secret-zz')
     expect(lines).toHaveLength(1)
     expect(lines[0]).toMatchObject({ level: 'info', msg: 'request', method: 'GET', path: '/health/live', status: 200 })
-    expect(JSON.stringify(lines[0])).not.toContain('abc')
+    expect(JSON.stringify(lines[0])).not.toContain('zz-secret-zz') // non-hex marker: can never appear inside the random hex trace id
   })
 
   it('hides error details behind a JSON 500 and logs them', async () => {
