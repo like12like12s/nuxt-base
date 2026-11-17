@@ -4,6 +4,12 @@ description: Change history of nuxt-base (newest first)
 ---
 # nuxt-base — Changelog
 
+### t1135 — kit: flaky generated request-log test (marker colliding with the hex trace id)
+- Root cause: `tests/app.spec.ts` asserts the request log does not contain the query-string marker `abc`, but the same log line carries the random hex trace id (`randomBytes(16).toString('hex')`) — an id containing `abc` trips the assertion. Measured 0.743% of ids (1M samples); reproduced deterministically by continuing a trusted traceparent with id `abcd`×8 through the real app (`/tmp/t1135-proof.mts`): log line contains `abc` → old assertion fails, marker absent → new one passes.
+- Fix: marker is now `zz-secret-zz` (contains `z`, not a hex digit — collision probability exactly 0) in `kit/modules/api/files/tests/app.spec.ts`, `kit/kinds/api/files-plain/tests/app.spec.ts`, `kit/tests/runtime-trace.spec.ts:96`.
+- Sweep of the same pattern repo-wide: `kit/tests/runtime-api.spec.ts:242` uses `?secret=abc` but has no not-contains assertion (no flake possible — left as is); `kit/modules/api/files-sample/tests/items.spec.ts:129` `limit=abc` is intentional invalid input for a validation test (no collision). No other `not.toContain` on a short hex-colliding marker.
+- `tests/app.spec.ts` is app-owned → `kit/UPGRADING.md` gained a `0.4.0 -> next` step (take the file over with `scaffold update --show`, or hand-edit the two lines). Applied to kit-ref (api/tests/app.spec.ts taken over; only the 2 marker lines differ).
+
 ## 2026-11-16
 
 ### v0.4.0 + t1123 — dev-kit fix4: second-review findings + upgrade-path gaps (epic t1092)
