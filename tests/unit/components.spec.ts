@@ -160,6 +160,8 @@ describe('Tooltip / IconButton (t1308: icon-only controls need a tooltip + aria-
     await w.trigger('mouseenter')
     // side=bottom with room below -> not flipped -> bubble below the trigger (top:100%)
     expect(w.find('[role="tooltip"]').classes()).toContain('top-full')
+    // and the CSS class owns placement alone — no inline top fighting it (t1329 hazard)
+    expect(tipEl.style.top).toBe('')
     for (const sp of spies) sp.mockRestore()
   })
 
@@ -271,5 +273,11 @@ describe('Tooltip / IconButton (t1308: icon-only controls need a tooltip + aria-
     const c = await mountSuspended(IconButton, { props: { label: 'Copy', target: '_blank' }, slots: { default: () => 'x' } })
     expect(c.find('button').attributes('target')).toBeUndefined()
     expect(c.find('button').attributes('rel')).toBeUndefined()
+    // the to (NuxtLink) link form passes them through too
+    const n = await mountSuspended(IconButton, { props: { label: 'Docs', to: '/x', target: '_blank' }, slots: { default: () => 'x' } })
+    const link = n.find('a')
+    expect(link.attributes('href')).toBe('/x')
+    expect(link.attributes('target')).toBe('_blank')
+    expect(link.attributes('rel')).toBe('noopener noreferrer')
   })
 })
