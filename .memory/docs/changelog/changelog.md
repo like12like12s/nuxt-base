@@ -4,6 +4,11 @@ description: Change history of nuxt-base (newest first)
 ---
 # nuxt-base — Changelog
 
+### t1308b — Tooltip: viewport clamp + flip + hide while its own menu is open (v0.5.1)
+- Follow-up from t1307 (jot at 390px): a centred bubble on a right-edge trigger ran past the viewport edge and stayed visible over its own open dropdown.
+- Tooltip now positions on mount (not only on hover, so the resting box a lens audit measures is the clamped one): clamps 8px inside the viewport, flips below the trigger when there is no room above, repositions on resize/scroll (capture), and force-hides (`!opacity-0`) while the trigger carries `aria-expanded="true"` (MutationObserver — menu toggles don't fire events near the tooltip).
+- 2 new unit tests (clamped left at 390px + flip; aria-expanded show/hide round-trip), full `npm test` green. Companion lens rule A11Y-011 (tooltip box inside viewport), standard 1.3.0.
+
 ### t1308 — Tooltip + IconButton: icon-only controls get a hover/focus tooltip + aria-label
 - User rule (2026-11-19): every icon-only button/link must show a tooltip on hover AND keyboard focus with the action name, matching aria-label — native `title=` alone is not enough ("ระบบเราเยอะ จำไม่หมด").
 - New `Tooltip.vue` (primitive wrapper: `label` + `side`, shows via group-hover/group-focus-within) and `IconButton.vue` (`label` REQUIRED → aria-label + title + tooltip; ghost/danger × sm/md/lg; `to`/`href` like Btn) in `app/components/`, mirrored to `~/.dev-mem/templates/components/` (sync-templates only verifies existing files — new ones copied once, now 26).

@@ -2,4 +2,4 @@
 // `scaffold check` reports local edits and `scaffold update` overwrites them. Change it in the kit instead.
 //
 // The kit version this project's locked files come from — reported by GET /version. `scaffold update` replaces it.
-export const KIT_VERSION = '0.5.0'
+export const KIT_VERSION = '0.5.1'

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
-import { nextTick } from 'vue'
+import { nextTick, h } from 'vue'
+import { vi } from 'vitest'
 import Btn from '../../app/components/Btn.vue'
 import IconButton from '../../app/components/IconButton.vue'
 import Tooltip from '../../app/components/Tooltip.vue'
@@ -146,6 +147,38 @@ describe('Tooltip / IconButton (t1308: icon-only controls need a tooltip + aria-
   it('Tooltip: side=bottom flips below the trigger', async () => {
     const w = await mountSuspended(Tooltip, { props: { label: 'x', side: 'bottom' }, slots: { default: () => '×' } })
     expect(w.find('[role="tooltip"]').classes()).toContain('top-full')
+  })
+
+  it('Tooltip: clamps inside the viewport at the right edge (390px, t1307 follow-up) and flips below when there is no room above', async () => {
+    const w = await mountSuspended(Tooltip, { props: { label: 'ชนิดของโน้ตที่จะสร้าง' }, slots: { default: () => '×' } })
+    const rootEl = w.element as HTMLElement
+    const tipEl = w.find('[role="tooltip"]').element as HTMLElement
+    const rect = { top: 20, bottom: 40, left: 340, right: 372, width: 32, height: 20, x: 340, y: 20, toJSON: () => {} } as DOMRect
+    const spies = [
+      vi.spyOn(rootEl, 'getBoundingClientRect').mockReturnValue(rect),
+      vi.spyOn(tipEl, 'offsetWidth', 'get').mockReturnValue(140),
+      vi.spyOn(tipEl, 'offsetHeight', 'get').mockReturnValue(24),
+      vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(390),
+    ]
+    await w.trigger('mouseenter')
+    // unclamped centred bubble would end at 340+16+70=426 > 382 — clamped to viewport-8
+    expect(parseFloat(tipEl.style.left)).toBe(390 - 8 - 140 - 340)
+    expect(w.find('[role="tooltip"]').classes()).toContain('top-full') // 20px of room above < 24+8 -> flipped below
+    for (const sp of spies) sp.mockRestore()
+  })
+
+  it('Tooltip: hides itself while the trigger menu is open (aria-expanded, t1307 follow-up)', async () => {
+    const w = await mountSuspended(Tooltip, { props: { label: 'เมนู' }, slots: { default: () => h('button', { type: 'button' }, 'm') } })
+    const btn = w.find('button').element
+    expect(w.find('[role="tooltip"]').classes()).not.toContain('!opacity-0')
+    btn.setAttribute('aria-expanded', 'true')
+    await new Promise(r => setTimeout(r, 25))
+    await nextTick()
+    expect(w.find('[role="tooltip"]').classes()).toContain('!opacity-0')
+    btn.setAttribute('aria-expanded', 'false')
+    await new Promise(r => setTimeout(r, 25))
+    await nextTick()
+    expect(w.find('[role="tooltip"]').classes()).not.toContain('!opacity-0')
   })
 
   it('IconButton: label becomes aria-label + title + the tooltip, with no visible text', async () => {
