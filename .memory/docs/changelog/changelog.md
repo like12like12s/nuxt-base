@@ -4,6 +4,11 @@ description: Change history of nuxt-base (newest first)
 ---
 # nuxt-base — Changelog
 
+### t1322 — Tooltip: clamped bubble no longer shifted left by half its width (v0.5.2)
+- Bug from v0.5.1: once `position()` set an inline `left`, the bubble kept `left-1/2 -translate-x-1/2`, so every measured bubble sat w/2 left of where the clamp put it (drill /coverage first-column dots: bubble at x=-18, trigger at x=201). Found by lens A11Y-011 on drill after adopting Tooltip.
+- Fix: the CSS centring classes apply only until `left` is measured. Why tests missed it: the unit test asserted `style.left` only; it now also asserts the centring classes are gone (fails on v0.5.1, passes now). `npm run gate` green (580 unit + 4 e2e, templates in sync).
+- Sweep (`grep translate app/components`): UiHint is the only other computed-offset bubble and was already right — its bubble has no translate, and its arrow's `-translate-x-1/2` is intended (that `left` is the arrow centre). Nothing else combines an inline offset with a translate.
+
 ### t1308b — Tooltip: viewport clamp + flip + hide while its own menu is open (v0.5.1)
 - Follow-up from t1307 (jot at 390px): a centred bubble on a right-edge trigger ran past the viewport edge and stayed visible over its own open dropdown.
 - Tooltip now positions on mount (not only on hover, so the resting box a lens audit measures is the clamped one): clamps 8px inside the viewport, flips below the trigger when there is no room above, repositions on resize/scroll (capture), and force-hides (`!opacity-0`) while the trigger carries `aria-expanded="true"` (MutationObserver — menu toggles don't fire events near the tooltip).

@@ -62,8 +62,11 @@ onUnmounted(() => {
     <span
       ref="tip"
       role="tooltip"
-      class="pointer-events-none absolute left-1/2 z-50 -translate-x-1/2 whitespace-nowrap rounded-md bg-zinc-100 px-2 py-1 text-[11px] font-medium text-zinc-900 shadow-lg transition-opacity duration-100 motion-reduce:transition-none"
+      class="pointer-events-none absolute z-50 whitespace-nowrap rounded-md bg-zinc-100 px-2 py-1 text-[11px] font-medium text-zinc-900 shadow-lg transition-opacity duration-100 motion-reduce:transition-none"
       :class="[
+        // centred by CSS until measured; once `left` is set it is the bubble's final offset from the
+        // trigger — keeping -translate-x-1/2 on top shifted every clamped bubble left by half its width (t1322)
+        left == null ? 'left-1/2 -translate-x-1/2' : '',
         (flipped ? side === 'top' : side === 'bottom') ? 'top-full mt-1.5' : 'bottom-full mb-1.5',
         menuOpen ? '!opacity-0' : 'opacity-0 group-hover/tt:opacity-100 group-focus-within/tt:opacity-100',
       ]"

@@ -163,6 +163,9 @@ describe('Tooltip / IconButton (t1308: icon-only controls need a tooltip + aria-
     await w.trigger('mouseenter')
     // unclamped centred bubble would end at 340+16+70=426 > 382 — clamped to viewport-8
     expect(parseFloat(tipEl.style.left)).toBe(390 - 8 - 140 - 340)
+    // `left` is the final offset — no CSS centring on top of it (it pushed the bubble w/2 off, t1322)
+    expect(w.find('[role="tooltip"]').classes()).not.toContain('-translate-x-1/2')
+    expect(w.find('[role="tooltip"]').classes()).not.toContain('left-1/2')
     expect(w.find('[role="tooltip"]').classes()).toContain('top-full') // 20px of room above < 24+8 -> flipped below
     for (const sp of spies) sp.mockRestore()
   })
