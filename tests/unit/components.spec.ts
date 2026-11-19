@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import { nextTick } from 'vue'
 import Btn from '../../app/components/Btn.vue'
+import IconButton from '../../app/components/IconButton.vue'
+import Tooltip from '../../app/components/Tooltip.vue'
 import AsyncState from '../../app/components/AsyncState.vue'
 import ErrorState from '../../app/components/ErrorState.vue'
 import EmptyState from '../../app/components/EmptyState.vue'
@@ -127,5 +129,42 @@ describe('labels follow the app language', () => {
     expect(await buttons(en)).toEqual(['Cancel', 'Confirm'])
     expect(await buttons({ ...en, props: { modelValue: true, title: 'Delete?', confirmLabel: 'Delete', cancelLabel: 'Keep' } })).toEqual(['Keep', 'Delete'])
     expect(await buttons({ global: { provide: { [NB_LABELS_KEY]: {} } } })).toEqual(['ยกเลิก', 'ยืนยัน'])
+  })
+})
+
+describe('Tooltip / IconButton (t1308: icon-only controls need a tooltip + aria-label)', () => {
+  it('Tooltip: renders the slot plus a role=tooltip bubble that shows on hover AND focus-within', async () => {
+    const w = await mountSuspended(Tooltip, { props: { label: 'คัดลอก' }, slots: { default: () => '×' } })
+    expect(w.text()).toContain('×')
+    const tip = w.find('[role="tooltip"]')
+    expect(tip.exists()).toBe(true)
+    expect(tip.text()).toBe('คัดลอก')
+    expect(tip.classes()).toContain('group-hover/tt:opacity-100')
+    expect(tip.classes()).toContain('group-focus-within/tt:opacity-100')
+  })
+
+  it('Tooltip: side=bottom flips below the trigger', async () => {
+    const w = await mountSuspended(Tooltip, { props: { label: 'x', side: 'bottom' }, slots: { default: () => '×' } })
+    expect(w.find('[role="tooltip"]').classes()).toContain('top-full')
+  })
+
+  it('IconButton: label becomes aria-label + title + the tooltip, with no visible text', async () => {
+    const w = await mountSuspended(IconButton, { props: { label: 'ลบ' }, slots: { default: () => 'svg' } })
+    const btn = w.find('button')
+    expect(btn.attributes('aria-label')).toBe('ลบ')
+    expect(btn.attributes('title')).toBe('ลบ')
+    expect(btn.attributes('type')).toBe('button')
+    expect(btn.text()).toBe('svg') // only the icon slot — no stray visible label
+    expect(w.find('[role="tooltip"]').text()).toBe('ลบ')
+  })
+
+  it('IconButton: variant/size/disabled and href link form', async () => {
+    const d = await mountSuspended(IconButton, { props: { label: 'Delete', variant: 'danger', size: 'sm', disabled: true }, slots: { default: () => 'x' } })
+    expect(d.find('button').attributes('disabled')).toBeDefined()
+    expect(d.find('button').classes()).toContain('h-7')
+    expect(d.find('button').classes()).toContain('w-7')
+    const a = await mountSuspended(IconButton, { props: { label: 'Open', href: 'https://x' }, slots: { default: () => 'x' } })
+    expect(a.find('a').attributes('href')).toBe('https://x')
+    expect(a.find('a').attributes('aria-label')).toBe('Open')
   })
 })

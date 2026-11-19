@@ -32,8 +32,11 @@ Measured: a consumer build with the peers installed takes ~6 s. `[ 'github:…',
   (`html.dark`). Scrollbar/focus/reduced-motion base styles included. External sites override tokens in their own css
   with another `@theme { --color-bg: … }` block after the layer's.
 - **Components** (auto-imported, no prefix): Avatar Badge Btn Card ConfirmModal Drawer Dropdown DropdownItem Field
-  HelpPopover Input Markdown Modal QuickChat SearchSpotlight Segmented Select Slider StatCard Table Tabs Toast Toggle UiHint
-  (the former template set) + `LoadingState` `EmptyState` `ErrorState` `AsyncState`.
+  HelpPopover IconButton Input Markdown Modal QuickChat SearchSpotlight Segmented Select Slider StatCard Table Tabs Toast
+  Toggle Tooltip UiHint (the former template set) + `LoadingState` `EmptyState` `ErrorState` `AsyncState`.
+- **Icon-only controls** (t1308): every icon-only button/link shows a tooltip on hover AND keyboard focus and carries a
+  matching `aria-label` — native `title=` alone is not enough. Use `<IconButton label="…">` (label required → aria-label
+  + title + tooltip) or wrap any trigger in `<Tooltip label="…">`.
 - **Patterns**: `<AsyncState :pending :error :empty :retry :has-data>` enforces loading → error → empty → content and never
   flashes an empty state while pending. `EmptyState` = title + what to do + CTA slot. `ErrorState` = what failed + real
   message + retry. `app/error.vue` default error page.

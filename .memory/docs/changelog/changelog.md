@@ -4,6 +4,12 @@ description: Change history of nuxt-base (newest first)
 ---
 # nuxt-base — Changelog
 
+### t1308 — Tooltip + IconButton: icon-only controls get a hover/focus tooltip + aria-label
+- User rule (2026-11-19): every icon-only button/link must show a tooltip on hover AND keyboard focus with the action name, matching aria-label — native `title=` alone is not enough ("ระบบเราเยอะ จำไม่หมด").
+- New `Tooltip.vue` (primitive wrapper: `label` + `side`, shows via group-hover/group-focus-within) and `IconButton.vue` (`label` REQUIRED → aria-label + title + tooltip; ghost/danger × sm/md/lg; `to`/`href` like Btn) in `app/components/`, mirrored to `~/.dev-mem/templates/components/` (sync-templates only verifies existing files — new ones copied once, now 26).
+- Version 0.4.0 → 0.5.0 (KIT_VERSION bumped with it), README component list + icon-only rule note. 4 new unit tests (tooltip render/side, label wiring, variants/link form); full `npm test` green (578 unit + 4 e2e + templates check).
+- Detection lives in lens ui-audit rule A11Y-010 (separate commit in lens); per-app fixes tracked as their own Pilot tasks.
+
 ### t1135 — kit: flaky generated request-log test (marker colliding with the hex trace id)
 - Root cause: `tests/app.spec.ts` asserts the request log does not contain the query-string marker `abc`, but the same log line carries the random hex trace id (`randomBytes(16).toString('hex')`) — an id containing `abc` trips the assertion. Measured 0.743% of ids (1M samples); reproduced deterministically by continuing a trusted traceparent with id `abcd`×8 through the real app (`/tmp/t1135-proof.mts`): log line contains `abc` → old assertion fails, marker absent → new one passes.
 - Fix: marker is now `zz-secret-zz` (contains `z`, not a hex digit — collision probability exactly 0) in `kit/modules/api/files/tests/app.spec.ts`, `kit/kinds/api/files-plain/tests/app.spec.ts`, `kit/tests/runtime-trace.spec.ts:96`.
