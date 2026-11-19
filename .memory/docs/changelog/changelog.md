@@ -1,3 +1,8 @@
+### t1329 — Tooltip: clamp the vertical axis — below-the-fold triggers left resting bubbles past the viewport edge (v0.5.3)
+- Found deploying the intzone A11Y-010 fix (icon-only sweep t1308): a trigger at/below the fold (long list rows, intzone manage) put its resting bubble h+6 above itself — still outside the viewport, so lens A11Y-011 fired on every clipped row.
+- position() now computes the CSS side spot, and when it falls outside [8, vh-8-h] clamps the bubble in via inline `top` and drops the side classes (their insets would fight it); scroll/resize repositions as before. X axis unchanged.
+- Tests: below-the-fold clamp asserts inline top = clamp + classes detached; fully-visible trigger asserts CSS placement kept; the side=bottom test now mocks real geometry (it leaned on happy-dom's zero rect, which the clamp catches). 582 pass.
+
 ### t1335 — sweep: v0.5.2 fix confirmed as the port of pilot aade66a6; one stale consumer copy fixed
 - Task asked to port the pilot fix (aade66a6: apply `left-1/2 -translate-x-1/2` only while `left == null`) — already shipped here as v0.5.2 (t1322, e2e5d0c) with the unit test asserting the centring classes are gone; mirror 4630011 identical. Closed as duplicate for the layer itself.
 - Consumer sweep (`grep "Rule t1308" ~/projects`): drill/ui extends #v0.5.2 (f9f5710) ✓ · pilot has its own fixed copy (aade66a6) ✓ · kit-ref on v0.4.0 predates Tooltip ✓ · agent-monitor had copied the mirror 18 min before the t1322 fix landed (t1324, v0.5.1 shape) — re-copied, tested, built, restarted via Pilot, live-verified (bundle has the conditional translate; health ok) · crg uses element-plus, not ours.

@@ -146,7 +146,21 @@ describe('Tooltip / IconButton (t1308: icon-only controls need a tooltip + aria-
 
   it('Tooltip: side=bottom flips below the trigger', async () => {
     const w = await mountSuspended(Tooltip, { props: { label: 'x', side: 'bottom' }, slots: { default: () => '×' } })
+    // real geometry (the old version leaned on happy-dom's zero rect, which the t1329 vertical clamp now catches)
+    const rect = { top: 400, bottom: 428, left: 200, right: 228, width: 28, height: 28, x: 200, y: 400, toJSON: () => {} } as DOMRect
+    const rootEl = w.element as HTMLElement
+    const tipEl = w.find('[role="tooltip"]').element as HTMLElement
+    const spies = [
+      vi.spyOn(rootEl, 'getBoundingClientRect').mockReturnValue(rect),
+      vi.spyOn(tipEl, 'offsetWidth', 'get').mockReturnValue(30),
+      vi.spyOn(tipEl, 'offsetHeight', 'get').mockReturnValue(24),
+      vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(375),
+      vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(812),
+    ]
+    await w.trigger('mouseenter')
+    // side=bottom with room below -> not flipped -> bubble below the trigger (top:100%)
     expect(w.find('[role="tooltip"]').classes()).toContain('top-full')
+    for (const sp of spies) sp.mockRestore()
   })
 
   it('Tooltip: clamps inside the viewport at the right edge (390px, t1307 follow-up) and flips below when there is no room above', async () => {
@@ -167,6 +181,47 @@ describe('Tooltip / IconButton (t1308: icon-only controls need a tooltip + aria-
     expect(w.find('[role="tooltip"]').classes()).not.toContain('-translate-x-1/2')
     expect(w.find('[role="tooltip"]').classes()).not.toContain('left-1/2')
     expect(w.find('[role="tooltip"]').classes()).toContain('top-full') // 20px of room above < 24+8 -> flipped below
+    for (const sp of spies) sp.mockRestore()
+  })
+
+  it('Tooltip: clamps the vertical axis too — a below-the-fold trigger leaves no bubble hanging past the viewport bottom (t1329, intzone manage rows)', async () => {
+    const w = await mountSuspended(Tooltip, { props: { label: 'Remove' }, slots: { default: () => '×' } })
+    const rootEl = w.element as HTMLElement
+    const tipEl = w.find('[role="tooltip"]').element as HTMLElement
+    // trigger at y=830 on a 375x812 phone: plenty of room above, but the bubble above it (y 800..824.5) still pokes past 812
+    const rect = { top: 830, bottom: 858, left: 299, right: 327, width: 28, height: 28, x: 299, y: 830, toJSON: () => {} } as DOMRect
+    const spies = [
+      vi.spyOn(rootEl, 'getBoundingClientRect').mockReturnValue(rect),
+      vi.spyOn(tipEl, 'offsetWidth', 'get').mockReturnValue(58),
+      vi.spyOn(tipEl, 'offsetHeight', 'get').mockReturnValue(24),
+      vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(375),
+      vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(812),
+    ]
+    await w.trigger('mouseenter')
+    // side=top not flipped -> CSS spot at 830-24-6=800 > 812-8-24=780 -> clamped to 780 absolute = -50 from the trigger
+    expect(parseFloat(tipEl.style.top)).toBe(780 - 830)
+    // while clamped the bubble detaches from the CSS side classes (their insets would fight the inline top)
+    const cls = w.find('[role="tooltip"]').classes()
+    expect(cls).not.toContain('top-full')
+    expect(cls).not.toContain('bottom-full')
+    for (const sp of spies) sp.mockRestore()
+  })
+
+  it('Tooltip: a fully visible trigger keeps the CSS side placement (no vertical clamp)', async () => {
+    const w = await mountSuspended(Tooltip, { props: { label: 'Copy URL' }, slots: { default: () => '×' } })
+    const rootEl = w.element as HTMLElement
+    const tipEl = w.find('[role="tooltip"]').element as HTMLElement
+    const rect = { top: 400, bottom: 428, left: 200, right: 228, width: 28, height: 28, x: 200, y: 400, toJSON: () => {} } as DOMRect
+    const spies = [
+      vi.spyOn(rootEl, 'getBoundingClientRect').mockReturnValue(rect),
+      vi.spyOn(tipEl, 'offsetWidth', 'get').mockReturnValue(58),
+      vi.spyOn(tipEl, 'offsetHeight', 'get').mockReturnValue(24),
+      vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(375),
+      vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(812),
+    ]
+    await w.trigger('mouseenter')
+    expect(tipEl.style.top).toBe('') // no inline top — the bottom-full mb-1.5 class owns placement
+    expect(w.find('[role="tooltip"]').classes()).toContain('bottom-full')
     for (const sp of spies) sp.mockRestore()
   })
 

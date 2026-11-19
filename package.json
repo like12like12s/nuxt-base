@@ -1,6 +1,6 @@
 {
   "name": "@like12like12s/nuxt-base",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Nuxt 4 base layer: Tailwind 4 preset + design tokens, core UI components, async/empty/error patterns, head/OG defaults, auth hook point. Extend it, never copy it.",
   "type": "module",
   "main": "./nuxt.config.ts",
