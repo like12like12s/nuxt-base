@@ -1,3 +1,15 @@
+---
+name: nuxt-base-changelog
+description: Change history of nuxt-base (newest first)
+---
+# nuxt-base — Changelog
+
+### t1338 — IconButton target/rel passthrough (v0.5.4); consumers catch up to the v0.5.3 vertical clamp
+- IconButton (canonical, layer + template mirror): `target`/`rel` props pass through to the link forms (`to`/`href`) for external new-tab icon links; `target="_blank"` without an explicit rel defaults to `noopener noreferrer` (tabnabbing); the button form carries neither. +1 unit test (explicit rel kept, safe default, button form clean). `npm run gate` green (585 unit + 4 e2e + templates 26 in sync).
+- Version 0.5.3 → 0.5.4 (package.json + `kit/runtime/api/kit-version.ts`), tag v0.5.4.
+- Consumers: drill/ui extends bumped #v0.5.2 → #v0.5.4 (superset of the v0.5.3 clamp + the passthrough) · dock + agent-monitor Tooltip copies re-synced from the layer · pilot's forked Tooltip ported the vertical clamp into its `tooltip-position` util (its width-cap fork stays) · laab checked: no Tooltip/IconButton copy — bespoke CSS `data-tooltip` in style.css, nothing to sync.
+- Changelog housekeeping: t1349/t1329/t1335 entries had landed above the frontmatter (t388 shape) — moved below the title.
+
 ### t1349 — kit gate: port bases out of the kernel's ephemeral range (EADDRINUSE flake)
 - Root cause of the t1335-verify flake: the run base `30000 + (pid%140)*250` could land inside the kernel's ephemeral range (`ip_local_port_range` = 32768-60999 here) — every outgoing connection takes a source port from that range, so a block `isFree()`-probed one minute was someone else's by the time the combo's server bound it (EADDRINUSE on 32774/44554, 1-3 combos/run while other sessions tested).
 - `ports.mjs` gains `ephemeralRange()` (reads /proc, Linux default as fallback) and `defaultBase(pid, lo)` (11000…lo-2000, 200 apart per pid); the gate refuses a pinned `--port-base` inside the range and caps the block walk at `max: lo-1` (65000 when pinned above it), so even a long skip-walk cannot cross into the range. `listen(0)` rejected: combos consume blocks of *consecutive* ports bound by their own child processes.
@@ -13,12 +25,6 @@
 - Task asked to port the pilot fix (aade66a6: apply `left-1/2 -translate-x-1/2` only while `left == null`) — already shipped here as v0.5.2 (t1322, e2e5d0c) with the unit test asserting the centring classes are gone; mirror 4630011 identical. Closed as duplicate for the layer itself.
 - Consumer sweep (`grep "Rule t1308" ~/projects`): drill/ui extends #v0.5.2 (f9f5710) ✓ · pilot has its own fixed copy (aade66a6) ✓ · kit-ref on v0.4.0 predates Tooltip ✓ · agent-monitor had copied the mirror 18 min before the t1322 fix landed (t1324, v0.5.1 shape) — re-copied, tested, built, restarted via Pilot, live-verified (bundle has the conditional translate; health ok) · crg uses element-plus, not ours.
 - Lens A11Y-011 fixture (right-edge only) gained the left-edge pair — the shape this bug actually produces (lens 110578b).
-
----
-name: nuxt-base-changelog
-description: Change history of nuxt-base (newest first)
----
-# nuxt-base — Changelog
 
 ### t1322 — Tooltip: clamped bubble no longer shifted left by half its width (v0.5.2)
 - Bug from v0.5.1: once `position()` set an inline `left`, the bubble kept `left-1/2 -translate-x-1/2`, so every measured bubble sat w/2 left of where the clamp put it (drill /coverage first-column dots: bubble at x=-18, trigger at x=201). Found by lens A11Y-011 on drill after adopting Tooltip.

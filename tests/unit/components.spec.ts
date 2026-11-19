@@ -258,4 +258,18 @@ describe('Tooltip / IconButton (t1308: icon-only controls need a tooltip + aria-
     expect(a.find('a').attributes('href')).toBe('https://x')
     expect(a.find('a').attributes('aria-label')).toBe('Open')
   })
+
+  it('IconButton: target/rel pass through to the link form; _blank without rel defaults to noopener noreferrer', async () => {
+    // explicit rel is kept verbatim
+    const a = await mountSuspended(IconButton, { props: { label: 'Docs', href: 'https://x', target: '_blank', rel: 'noopener' }, slots: { default: () => 'x' } })
+    expect(a.find('a').attributes('target')).toBe('_blank')
+    expect(a.find('a').attributes('rel')).toBe('noopener')
+    // bare target=_blank gets the safe default (tabnabbing)
+    const b = await mountSuspended(IconButton, { props: { label: 'Docs', href: 'https://x', target: '_blank' }, slots: { default: () => 'x' } })
+    expect(b.find('a').attributes('rel')).toBe('noopener noreferrer')
+    // plain button form carries neither
+    const c = await mountSuspended(IconButton, { props: { label: 'Copy', target: '_blank' }, slots: { default: () => 'x' } })
+    expect(c.find('button').attributes('target')).toBeUndefined()
+    expect(c.find('button').attributes('rel')).toBeUndefined()
+  })
 })

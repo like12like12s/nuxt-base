@@ -3,17 +3,23 @@
 // both the accessible name (aria-label) and the hover/focus tooltip (via Tooltip) — rule t1308:
 // native title= alone is not enough, and an icon without a name is a guess.
 // `to` renders NuxtLink (Nuxt only), `href` renders <a>, otherwise <button>.
+// `target`/`rel` pass through to the link forms (external new-tab icon links: target="_blank");
+// target=_blank without an explicit rel defaults to noopener noreferrer (tabnabbing).
 const props = withDefaults(defineProps<{
   label: string
   variant?: 'ghost' | 'danger'
   size?: 'sm' | 'md' | 'lg'
   to?: string
   href?: string
+  target?: string
+  rel?: string
   type?: 'button' | 'submit'
   disabled?: boolean
-}>(), { variant: 'ghost', size: 'md', type: 'button', to: undefined, href: undefined })
+}>(), { variant: 'ghost', size: 'md', type: 'button', to: undefined, href: undefined, target: undefined, rel: undefined })
 
 const tag = computed(() => (props.to ? resolveComponent('NuxtLink') : props.href ? 'a' : 'button'))
+const isLink = computed(() => !!(props.to || props.href))
+const relValue = computed(() => props.rel ?? (props.target === '_blank' ? 'noopener noreferrer' : undefined))
 
 const variants = {
   ghost: 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800',
@@ -32,6 +38,8 @@ const sizes = {
       :is="tag"
       :to="to"
       :href="href"
+      :target="isLink ? target : undefined"
+      :rel="isLink ? relValue : undefined"
       :type="!to && !href ? type : undefined"
       :disabled="!to && !href ? disabled : undefined"
       :aria-label="label"
