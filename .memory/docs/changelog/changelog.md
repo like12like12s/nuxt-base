@@ -1,3 +1,8 @@
+### t1335 — sweep: v0.5.2 fix confirmed as the port of pilot aade66a6; one stale consumer copy fixed
+- Task asked to port the pilot fix (aade66a6: apply `left-1/2 -translate-x-1/2` only while `left == null`) — already shipped here as v0.5.2 (t1322, e2e5d0c) with the unit test asserting the centring classes are gone; mirror 4630011 identical. Closed as duplicate for the layer itself.
+- Consumer sweep (`grep "Rule t1308" ~/projects`): drill/ui extends #v0.5.2 (f9f5710) ✓ · pilot has its own fixed copy (aade66a6) ✓ · kit-ref on v0.4.0 predates Tooltip ✓ · agent-monitor had copied the mirror 18 min before the t1322 fix landed (t1324, v0.5.1 shape) — re-copied, tested, built, restarted via Pilot, live-verified (bundle has the conditional translate; health ok) · crg uses element-plus, not ours.
+- Lens A11Y-011 fixture (right-edge only) gained the left-edge pair — the shape this bug actually produces (lens 110578b).
+
 ---
 name: nuxt-base-changelog
 description: Change history of nuxt-base (newest first)
