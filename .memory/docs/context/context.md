@@ -6,8 +6,8 @@ description: Current state of nuxt-base — the Nuxt 4 base layer + the dev-kit 
 
 ## Current State
 
-- Two things in one repo (`like12like12s/nuxt-base`, path `~/projects/nuxt-base`, **public** — keep internal hosts/credentials out), one version = package.json = git tag (now **v0.4.0**):
-  - Nuxt 4 **layer**: `extends: ['github:like12like12s/nuxt-base#vX.Y.Z']` + peer deps in the app — Tailwind 4 preset + zinc-dark tokens, 24 core Vue components + Loading/Empty/Error/AsyncState, `useSiteHead`/`useToast`/`useAuth`, `error.vue`
+- Two things in one repo (`like12like12s/nuxt-base`, path `~/projects/nuxt-base`, **public** — keep internal hosts/credentials out), one version = package.json = git tag (now **v0.5.4**):
+  - Nuxt 4 **layer**: `extends: ['github:like12like12s/nuxt-base#vX.Y.Z']` + peer deps in the app — Tailwind 4 preset + zinc-dark tokens, 26 core Vue components (incl. Tooltip + icon-only IconButton, rule t1308) + Loading/Empty/Error/AsyncState, `useSiteHead`/`useToast`/`useAuth`, `error.vue`
   - **dev-kit** in `kit/` (epic t1092): zero-dep generator `kit/bin/scaffold.mjs` (`new | add | check | update | list`, `--json`) — kinds nuxt-app / api / fullstack; modules base, ci-github, api, db, auth, trace, og, testkit, security, jobs, notify; deploy presets cf-pages / container / pm2
 - Kit model: app-owned files are generated once; locked runtime files are copied from `kit/runtime/**` to the app's `src/kit/<area>/` with hashes in `.scaffold.json`; `check` = clean | drift | kit-unreleased; `update` re-copies locked files and prints the by-hand steps from `kit/UPGRADING.md`
 - Stack the kit generates: hono + zod-openapi (`/api/v1`, error shape with traceId, openapi.json contract test, typed client), Kysely (one migration set for SQLite and MySQL), forward-auth headers behind a trusted proxy + service tokens, OTel trace, generated gate = typecheck → oxlint → test

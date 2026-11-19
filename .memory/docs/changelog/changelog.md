@@ -7,7 +7,8 @@ description: Change history of nuxt-base (newest first)
 ### t1338 — IconButton target/rel passthrough (v0.5.4); consumers catch up to the v0.5.3 vertical clamp
 - IconButton (canonical, layer + template mirror): `target`/`rel` props pass through to the link forms (`to`/`href`) for external new-tab icon links; `target="_blank"` without an explicit rel defaults to `noopener noreferrer` (tabnabbing); the button form carries neither. +1 unit test (explicit rel kept, safe default, button form clean). `npm run gate` green (585 unit + 4 e2e + templates 26 in sync).
 - Version 0.5.3 → 0.5.4 (package.json + `kit/runtime/api/kit-version.ts`), tag v0.5.4.
-- Consumers: drill/ui extends bumped #v0.5.2 → #v0.5.4 (superset of the v0.5.3 clamp + the passthrough) · dock + agent-monitor Tooltip copies re-synced from the layer · pilot's forked Tooltip ported the vertical clamp into its `tooltip-position` util (its width-cap fork stays) · laab checked: no Tooltip/IconButton copy — bespoke CSS `data-tooltip` in style.css, nothing to sync.
+- Consumers: drill/ui extends bumped #v0.5.2 → #v0.5.4 (superset of the v0.5.3 clamp + the passthrough), deployed 20261120-002119-745d243 (healthy, smoke 200, live chunk DHhCvT-q.js has both clamps) · dock + agent-monitor Tooltip copies re-synced from the layer and deployed/restarted (live chunks DSOUn-qc.js / C9PkazoD.js) · pilot's forked Tooltip ported the vertical clamp into its `tooltip-position` util (its width-cap fork stays), built on the serving host, PILOT-WEB restarted via the Pilot API (live chunk yLn51DNA.js) · laab checked: no Tooltip/IconButton copy — bespoke CSS `data-tooltip` in style.css, nothing to sync.
+- Post-release `gate:kit` rerun against the tag: 21/21 passed (per the after-a-release rule).
 - Changelog housekeeping: t1349/t1329/t1335 entries had landed above the frontmatter (t388 shape) — moved below the title.
 
 ### t1349 — kit gate: port bases out of the kernel's ephemeral range (EADDRINUSE flake)
