@@ -19,7 +19,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { combos } from './combos.mjs'
-import { portBlocks } from './ports.mjs'
+import { defaultBase, ephemeralRange, portBlocks } from './ports.mjs'
 
 const KIT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const REPO = resolve(KIT, '..')
@@ -49,12 +49,19 @@ const tagRef = flags['layer-ref'] ?? (latestTag ? `github:like12like12s/nuxt-bas
 const localRef = flags['layer-ref'] ?? REPO
 
 // Ports: every combo gets a block of 10 above a base that differs per run (derived from the pid), so two gate runs on
-// one machine — two checkouts, two sessions — do not answer each other's probes. --port-base pins it.
-const PORT_BASE = Number(flags['port-base']) || 30000 + (process.pid % 140) * 250
+// one machine — two checkouts, two sessions — do not answer each other's probes. --port-base pins it. The base and
+// every block probed after it stay out of the kernel's ephemeral range: a port there can be probed free and still be
+// taken by an outgoing connection of any other process before the combo's server binds it (t1349 — that cost the
+// t1335 verify run 1-3 combos on EADDRINUSE).
+const ephemeral = ephemeralRange()
+const PORT_BASE = Number(flags['port-base']) || defaultBase(process.pid, ephemeral.lo)
 if (!Number.isInteger(PORT_BASE) || PORT_BASE < 1024 || PORT_BASE > 65000) { console.error('kit gate: --port-base must be a port between 1024 and 65000'); process.exit(2) }
+if (PORT_BASE >= ephemeral.lo && PORT_BASE <= ephemeral.hi) { console.error(`kit gate: --port-base ${PORT_BASE} is inside the ephemeral range ${ephemeral.lo}-${ephemeral.hi} — outgoing connections grab those ports at any moment, so a probed-free port can be taken before the combo binds it`); process.exit(2) }
+const PORT_MAX = PORT_BASE < ephemeral.lo ? ephemeral.lo - 1 : 65000
 // The base only says where to start: a block is probed right before its combo starts, and one with a port another
-// process holds is skipped (ports.mjs) — a busy port costs a notice, not a combo.
-const ports = portBlocks({ base: PORT_BASE, size: 10, onSkip: ({ start, busy }) => console.log(`NOTICE port ${busy} is in use — the block ${start}-${start + 9} is skipped`) })
+// process holds is skipped (ports.mjs) — a busy port costs a notice, not a combo. `max` keeps even a long walk of
+// skipped blocks from crossing into the ephemeral range.
+const ports = portBlocks({ base: PORT_BASE, size: 10, max: PORT_MAX, onSkip: ({ start, busy }) => console.log(`NOTICE port ${busy} is in use — the block ${start}-${start + 9} is skipped`) })
 
 const dirs = new Set()
 const schemas = new Set() // `test_gate_*` schemas created on the MySQL server — dropped after each combo and on exit
@@ -503,7 +510,7 @@ async function gateCombo(combo, index) {
 
 mysqlUrl = await provideMysql()
 const concurrency = Math.max(1, Number(flags.concurrency) || Math.min(4, Math.floor(availableParallelism() / 2) || 1))
-console.log(`kit gate: ${selected.length} job(s), concurrency ${concurrency}, ports ${PORT_BASE}+, docker ${docker ? 'yes' : 'NO (image builds skipped)'}, mysql ${mysqlUrl ? (process.env.TEST_MYSQL_URL ? 'TEST_MYSQL_URL' : 'throwaway container') : selected.some((c) => c.runtime || c.db === 'mysql') ? 'NO (MySQL runs skipped)' : 'not needed'}, layer local=${localRef} tag=${tagRef}`)
+console.log(`kit gate: ${selected.length} job(s), concurrency ${concurrency}, ports ${PORT_BASE}-${PORT_MAX}, docker ${docker ? 'yes' : 'NO (image builds skipped)'}, mysql ${mysqlUrl ? (process.env.TEST_MYSQL_URL ? 'TEST_MYSQL_URL' : 'throwaway container') : selected.some((c) => c.runtime || c.db === 'mysql') ? 'NO (MySQL runs skipped)' : 'not needed'}, layer local=${localRef} tag=${tagRef}`)
 const queue = selected.map((combo) => ({ combo, index: combo.runtime ? combos.length : combos.indexOf(combo) }))
 const results = []
 await Promise.all(Array.from({ length: concurrency }, async () => {

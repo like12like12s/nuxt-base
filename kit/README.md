@@ -488,9 +488,12 @@ node kit/tests/kit-gate.mjs --only fullstack --keep     # one family, keep the t
 ```
 
 Ports of the kit gate: each combo takes a block of 10 host ports above a base that differs per run (derived from the
-pid; `--port-base N` pins it). A block is probed right before its combo starts — every port, with a real listen —
-and a block in which another process holds a port is skipped with a `NOTICE` (`kit/tests/ports.mjs`), so two gate
-runs or an unrelated server on the machine cost a notice, not a combo.
+pid; `--port-base N` pins it). The base and every block after it stay out of the kernel's ephemeral range
+(`net.ipv4.ip_local_port_range`, by default 32768-60999) — outgoing connections take source ports from that range at
+any moment, so a port probed free inside it can be someone else's before the combo binds it; a `--port-base` inside
+the range is refused. A block is probed right before its combo starts — every port, with a real listen — and a block
+in which another process holds a port is skipped with a `NOTICE` (`kit/tests/ports.mjs`), so two gate runs or an
+unrelated server on the machine cost a notice, not a combo.
 
 The unit tests cover composition per kind / preset / module, determinism, every exit code, check / update, generator
 dispatch, the locked runtime at the source — `runtime-api` (trace id, error shape, pagination, health, createApi),

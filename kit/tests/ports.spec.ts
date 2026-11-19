@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { KIT_ROOT } from './helpers'
 // @ts-expect-error plain ESM, no types
-import { isFree, portBlocks } from './ports.mjs'
+import { defaultBase, ephemeralRange, isFree, portBlocks } from './ports.mjs'
 
 const servers: Server[] = []
 afterEach(async () => { await Promise.all(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve)))) })
@@ -70,10 +70,38 @@ describe('kit gate ports', () => {
     await expect(portBlocks({ base: 65530, size: 10, probe: async () => true }).next()).rejects.toThrow(/no free block/)
   })
 
-  it('the kit gate takes every combo\'s ports from it', () => {
+  it('ephemeralRange: read from the kernel, with the Linux default when the file is missing or garbage', () => {
+    const read = (path: string) => (path === '/proc/sys/net/ipv4/ip_local_port_range' ? '32768\t60999\n' : (() => { throw new Error('nope') })())
+    expect(ephemeralRange(read)).toEqual({ lo: 32768, hi: 60999 })
+    expect(ephemeralRange(() => '1024  65535\n')).toEqual({ lo: 1024, hi: 65535 })
+    const fallback = { lo: 32768, hi: 60999 }
+    expect(ephemeralRange(() => { throw new Error('ENOENT') })).toEqual(fallback) // not Linux
+    expect(ephemeralRange(() => '')).toEqual(fallback)
+    expect(ephemeralRange(() => 'garbage')).toEqual(fallback)
+    expect(ephemeralRange(() => '60999 32768')).toEqual(fallback) // lo > hi
+    expect(ephemeralRange()).toEqual(fallback) // the real host file parses (Linux default on this fleet)
+  })
+
+  it('defaultBase: per pid deterministic, and every pid lands below the ephemeral range with room for a run on top', () => {
+    expect(defaultBase(1234, 32768)).toBe(defaultBase(1234, 32768))
+    expect(defaultBase(0, 32768)).toBe(11000)
+    for (let pid = 0; pid < 1000; pid++) {
+      const base = defaultBase(pid, 32768)
+      expect(base).toBeGreaterThanOrEqual(11000)
+      expect(base).toBeLessThanOrEqual(32768 - 2000) // headroom: 200 blocks of 10 below the ephemeral start
+      expect((base - 11000) % 200).toBe(0) // blocks of two runs never interleave arbitrarily
+    }
+    expect(new Set(Array.from({ length: 90 }, (_, pid) => defaultBase(pid, 32768))).size).toBeGreaterThan(50) // real spread across pids
+    expect(defaultBase(7, 11000)).toBe(11000) // degenerate host (ephemeral from 11000): no room below — the gate's range check refuses this loudly
+  })
+
+  it('the kit gate takes every combo\'s ports from it, below the ephemeral range', () => {
     const gate = readFileSync(join(KIT_ROOT, 'tests/kit-gate.mjs'), 'utf8')
-    expect(gate).toContain('const ports = portBlocks({ base: PORT_BASE, size: 10,')
+    expect(gate).toContain('const ports = portBlocks({ base: PORT_BASE, size: 10, max: PORT_MAX,')
     expect(gate).toContain('const port = await ports.next()')
+    expect(gate).toContain('defaultBase(process.pid, ephemeral.lo)')
+    expect(gate).toContain('is inside the ephemeral range') // a pinned base inside the range is refused, not flaked on
     expect(gate).not.toMatch(/PORT_BASE \+ index/)
+    expect(gate).not.toMatch(/30000 \+ \(process\.pid/) // the old formula reached into the ephemeral range (t1349)
   })
 })

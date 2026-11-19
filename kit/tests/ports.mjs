@@ -2,7 +2,30 @@
 // ports is probed (a real listen on all interfaces), and a block with a port somebody else holds is skipped — the
 // combo simply gets the next one. A block is never handed out twice in one run.
 // (v0.3.0 post-tag run: one combo failed because another session's server sat on a port of its block.)
+// (t1349: bases used to reach into the ephemeral range — see ephemeralRange — and 1-3 combos per run lost their
+// probed-free port to an outgoing connection of some other process before the combo's server bound it.)
+import { readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
+
+/** The kernel's ephemeral (local port) range: every outgoing connection takes a source port from it, so a port
+ *  probed free inside the range can be taken by unrelated traffic at any moment. Linux default as the fallback. */
+export function ephemeralRange(read = readFileSync) {
+  try {
+    const [lo, hi] = read('/proc/sys/net/ipv4/ip_local_port_range', 'utf8').trim().split(/\s+/).map(Number)
+    if (Number.isInteger(lo) && Number.isInteger(hi) && 0 < lo && lo <= hi) return { lo, hi }
+  } catch { /* not Linux or not readable */ }
+  return { lo: 32768, hi: 60999 }
+}
+
+/** Default per-run base of the kit gate: below the ephemeral range (never raced on by outgoing connections),
+ *  spread per pid so two runs on one machine start on different ground — a collision is still possible, and then
+ *  the probe skips that block with a notice. `lo - 2000` leaves 200 blocks of headroom above the highest base for
+ *  one run's jobs (16) plus skipped busy blocks. */
+export function defaultBase(pid, lo = ephemeralRange().lo) {
+  const low = 11000
+  const spread = Math.max(1, Math.floor((lo - 2000 - low) / 200))
+  return low + (pid % spread) * 200
+}
 
 /** Can a server listen on `port` right now — i.e. nothing holds it on any interface? */
 export function isFree(port, host = '0.0.0.0') {
