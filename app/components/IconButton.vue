@@ -5,6 +5,17 @@
 // `to` renders NuxtLink (Nuxt only), `href` renders <a>, otherwise <button>.
 // `target`/`rel` pass through to the link forms (external new-tab icon links: target="_blank");
 // target=_blank without an explicit rel defaults to noopener noreferrer (tabnabbing).
+// Fallthrough attrs: class/style (layout — ml-auto, xl:hidden) stay on the outer Tooltip wrapper,
+// which is the box the parent lays out; every other attr (id, data-testid, aria-*, @click…) lands
+// on the interactive element itself — Tooltip reads aria-expanded off its first child to hide
+// the bubble while a menu is open, so it must not end up on the wrapper (t1368).
+defineOptions({ inheritAttrs: false })
+const attrs = useAttrs()
+const controlAttrs = computed(() => {
+  const { class: _c, style: _s, ...rest } = attrs
+  return rest
+})
+
 const props = withDefaults(defineProps<{
   label: string
   variant?: 'ghost' | 'danger'
@@ -33,9 +44,10 @@ const sizes = {
 </script>
 
 <template>
-  <Tooltip :label="label">
+  <Tooltip :label="label" :class="$attrs.class" :style="$attrs.style">
     <component
       :is="tag"
+      v-bind="controlAttrs"
       :to="to"
       :href="href"
       :target="isLink ? target : undefined"

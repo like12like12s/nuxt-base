@@ -280,4 +280,47 @@ describe('Tooltip / IconButton (t1308: icon-only controls need a tooltip + aria-
     expect(link.attributes('target')).toBe('_blank')
     expect(link.attributes('rel')).toBe('noopener noreferrer')
   })
+
+  it('IconButton: fallthrough attrs land on the control; class/style stay on the layout wrapper (t1368)', async () => {
+    let clicks = 0
+    const w = await mountSuspended(IconButton, {
+      props: { label: 'Menu' },
+      attrs: { id: 'm1', 'data-testid': 'menu-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false', class: 'ml-auto', style: 'order: 2', onClick: () => { clicks++ } },
+      slots: { default: () => 'x' },
+    })
+    const wrapper = w.element as HTMLElement
+    const btn = w.find('button')
+    // control carries identity, ARIA state and the listener
+    expect(btn.attributes('id')).toBe('m1')
+    expect(btn.attributes('data-testid')).toBe('menu-btn')
+    expect(btn.attributes('aria-haspopup')).toBe('menu')
+    expect(btn.attributes('aria-expanded')).toBe('false')
+    expect(btn.classes()).not.toContain('ml-auto')
+    // wrapper keeps the layout class/style and none of the control attrs
+    expect(wrapper.classList.contains('ml-auto')).toBe(true)
+    expect(wrapper.style.order).toBe('2')
+    for (const a of ['id', 'data-testid', 'aria-expanded', 'aria-haspopup']) expect(wrapper.hasAttribute(a)).toBe(false)
+    await btn.trigger('click')
+    expect(clicks).toBe(1)
+    // the component's own label still wins over a stray consumer aria-label
+    const o = await mountSuspended(IconButton, { props: { label: 'Real' }, attrs: { 'aria-label': 'stray' }, slots: { default: () => 'x' } })
+    expect(o.find('button').attributes('aria-label')).toBe('Real')
+    // the link forms get the attrs too
+    const a = await mountSuspended(IconButton, { props: { label: 'Open', href: 'https://x' }, attrs: { 'data-testid': 'open-link' }, slots: { default: () => 'x' } })
+    expect(a.find('a').attributes('data-testid')).toBe('open-link')
+  })
+
+  it('IconButton: disabled swallows a consumer @click (listener is on the <button>, not the wrapper)', async () => {
+    let clicks = 0
+    const w = await mountSuspended(IconButton, { props: { label: 'Del', disabled: true }, attrs: { onClick: () => { clicks++ } }, slots: { default: () => 'x' } })
+    await w.find('button').trigger('click')
+    expect(clicks).toBe(0)
+  })
+
+  it('IconButton: aria-expanded="true" from the consumer hides the Tooltip bubble (menu open)', async () => {
+    const w = await mountSuspended(IconButton, { props: { label: 'Menu' }, attrs: { 'aria-expanded': 'true' }, slots: { default: () => 'x' } })
+    await w.trigger('mouseenter')
+    await nextTick()
+    expect(w.find('[role="tooltip"]').classes()).toContain('!opacity-0')
+  })
 })
