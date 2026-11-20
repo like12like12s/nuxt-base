@@ -22,13 +22,16 @@ function hold(port: number, host = '127.0.0.1'): Promise<boolean> {
 }
 
 /** A base whose first four blocks are free right now (the test machine runs other things too).
- * Drawn below the kernel ephemeral range (same reason as t1349: any outgoing connection can grab a port in
+ * Drawn just below the kernel ephemeral range, above the gate's defaultBase band (same reason as t1349: any outgoing connection can grab a port in
  * it between the probe and the assert) and probing every port the tests touch — the block test reaches
  * base+39; probing only base+29 let a busy fourth block through (t1368 verify flake: 40130 -> 40140). */
 async function freeBase(): Promise<number> {
-  const top = ephemeralRange().lo - 1000
+  // band [lo-1900, lo-200]: above every pid's defaultBase (≤ lo-2000), so a concurrent gate run's own servers
+  // don't start there either; and +40 still ends below lo
+  const { lo } = ephemeralRange()
+  if (lo - 1900 < 1024) throw new Error(`ephemeral range starts at ${lo}: no room for a test port band below it`)
   for (let tries = 0; tries < 40; tries++) {
-    const base = 15000 + Math.floor(Math.random() * Math.max(1, (top - 15000) / 100)) * 100
+    const base = lo - 1900 + Math.floor(Math.random() * 18) * 100
     let free = true
     for (let port = base; port < base + 40 && free; port++) free = await isFree(port)
     if (free) return base
