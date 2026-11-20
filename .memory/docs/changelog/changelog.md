@@ -4,6 +4,10 @@ description: Change history of nuxt-base (newest first)
 ---
 # nuxt-base — Changelog
 
+### t1368b — kit ports.spec flake: freeBase drew bases inside the ephemeral range and under-probed
+- `ai verify` run 2 failed `a block with a port in use is skipped` (expected 40130, got 40140). `freeBase()` picked bases in 20000–59900, which overlaps the kernel ephemeral range (32768–60999, same root cause as t1349), and probed only base..base+29 while the test reaches base+39, so a busy fourth block slipped through.
+- Fix: bases come from 15000…(ephemeral lo − 1000), all 40 ports are probed, and the test asserts base+40 ≤ lo. Sweep: the only random-port picker in tests/ scripts/ kit/tests. 10/10 isolated runs green; full gate green.
+
 ### t1368 — IconButton: fallthrough attrs land on the control, not Tooltip's wrapper (v0.5.5)
 - Bug (fresh-review t1338 #1): IconButton's root is `<Tooltip>`, so `id` / `data-testid` / `aria-*` / `@click` from consumers fell through to Tooltip's wrapper `<span>`. A menu trigger's `aria-expanded` sat on the wrapper, and Tooltip reads it off its *first child*, so the hide-while-menu-open bubble never hid; the testid/id pointed at a non-interactive span; and `@click` on a disabled button still fired through the wrapper.
 - Fix: `inheritAttrs: false`. `class`/`style` stay on the wrapper (it's the box the parent lays out: ml-auto, xl:hidden). Every other attr is `v-bind`-ed onto the interactive element (button / `<a>` / NuxtLink), before the component's own attrs, so `label` still wins for aria-label/title. Same split agent-remote's local copy already used.
