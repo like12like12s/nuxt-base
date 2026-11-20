@@ -6,7 +6,8 @@
 // `target`/`rel` pass through to the link forms (external new-tab icon links: target="_blank");
 // target=_blank without an explicit rel defaults to noopener noreferrer (tabnabbing).
 // Fallthrough attrs: class/style (layout — ml-auto, xl:hidden) stay on the outer Tooltip wrapper,
-// which is the box the parent lays out; every other attr (id, data-testid, aria-*, @click…) lands
+// which is the box the parent lays out — so `class` is a LAYOUT contract only: visual state on the control
+// (colour, pressed look) goes through `variant`, not class; every other attr (id, data-testid, aria-*, @click…) lands
 // on the interactive element itself — Tooltip reads aria-expanded off its first child to hide
 // the bubble while a menu is open, so it must not end up on the wrapper (t1368).
 defineOptions({ inheritAttrs: false })

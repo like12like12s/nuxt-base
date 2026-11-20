@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
-import { nextTick, h } from 'vue'
+import { nextTick, h, ref, defineComponent } from 'vue'
 import { vi } from 'vitest'
 import Btn from '../../app/components/Btn.vue'
 import IconButton from '../../app/components/IconButton.vue'
@@ -322,5 +322,18 @@ describe('Tooltip / IconButton (t1308: icon-only controls need a tooltip + aria-
     await w.trigger('mouseenter')
     await nextTick()
     expect(w.find('[role="tooltip"]').classes()).toContain('!opacity-0')
+  })
+
+  it('IconButton: aria-expanded flipping after mount (a real dropdown) still reaches the control and hides the bubble', async () => {
+    const open = ref(false)
+    const Host = defineComponent({ setup: () => () => h(IconButton, { label: 'Menu', 'aria-expanded': open.value ? 'true' : 'false' }, () => 'x') })
+    const w = await mountSuspended(Host)
+    const tip = () => w.find('[role="tooltip"]')
+    expect(tip().classes()).not.toContain('!opacity-0')
+    open.value = true
+    await nextTick()
+    expect(w.find('button').attributes('aria-expanded')).toBe('true')
+    await new Promise((r) => setTimeout(r, 0)) // Tooltip's MutationObserver callback
+    expect(tip().classes()).toContain('!opacity-0')
   })
 })
