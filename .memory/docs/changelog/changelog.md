@@ -4,6 +4,13 @@ description: Change history of nuxt-base (newest first)
 ---
 # nuxt-base — Changelog
 
+### t1368 — IconButton: fallthrough attrs land on the control, not Tooltip's wrapper (v0.5.5)
+- Bug (fresh-review t1338 #1): IconButton's root is `<Tooltip>`, so `id` / `data-testid` / `aria-*` / `@click` from consumers fell through to Tooltip's wrapper `<span>`. A menu trigger's `aria-expanded` sat on the wrapper, and Tooltip reads it off its *first child*, so the hide-while-menu-open bubble never hid; the testid/id pointed at a non-interactive span; and `@click` on a disabled button still fired through the wrapper.
+- Fix: `inheritAttrs: false`. `class`/`style` stay on the wrapper (it's the box the parent lays out: ml-auto, xl:hidden). Every other attr is `v-bind`-ed onto the interactive element (button / `<a>` / NuxtLink), before the component's own attrs, so `label` still wins for aria-label/title. Same split agent-remote's local copy already used.
+- Tests: +3 unit (attrs on control + class/style on wrapper + link form; disabled swallows consumer click; consumer aria-expanded="true" hides the bubble). The attrs and aria-expanded tests fail on v0.5.4. `npm run gate` green (588 unit + 4 e2e, templates 26 in sync); mirror synced (`~/.dev-mem` 97b2000).
+- Version 0.5.4 → 0.5.5 (package.json + kit-version.ts), tag v0.5.5.
+- Consumer sweep (`grep "<IconButton" ~/projects`): no consumer of the canonical layer/mirror component passes attrs (drill/ui, kit-ref have no IconButton usages, so no bump needed). intzone's local copy only gets props + @click (bubbling made it work). agent-remote's copy already splits attrs this way. Nothing to change downstream.
+
 ### t1338 — IconButton target/rel passthrough (v0.5.4); consumers catch up to the v0.5.3 vertical clamp
 - IconButton (canonical, layer + template mirror): `target`/`rel` props pass through to the link forms (`to`/`href`) for external new-tab icon links; `target="_blank"` without an explicit rel defaults to `noopener noreferrer` (tabnabbing); the button form carries neither. +1 unit test (explicit rel kept, safe default, button form clean). `npm run gate` green (585 unit + 4 e2e + templates 26 in sync).
 - Version 0.5.3 → 0.5.4 (package.json + `kit/runtime/api/kit-version.ts`), tag v0.5.4.
