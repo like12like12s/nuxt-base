@@ -4,6 +4,12 @@ description: Change history of nuxt-base (newest first)
 ---
 # nuxt-base — Changelog
 
+### t1368c — fresh-review round 1 (0🔴 5🟡): fixed 4, kept 1
+- IconButton header now states `class` is a layout-only contract (visual state goes through `variant`). The class-on-wrapper split stays (deliberate, matches agent-remote).
+- +1 unit test: `aria-expanded` flipped after mount (host component with a ref) reaches the control and hides the bubble. Fails on v0.5.4.
+- ports.spec `freeBase`: band moved to [lo-1900, lo-200], above every pid's kit-gate `defaultBase` (≤ lo-2000), so concurrent gate servers don't start there. Throws when the ephemeral range starts too low to fit a band. The `base+40 ≤ lo` guard is kept (cheap).
+- Comment/test-only on top of v0.5.5: no version bump. Gate green (589 unit + 4 e2e, templates in sync).
+
 ### t1368b — kit ports.spec flake: freeBase drew bases inside the ephemeral range and under-probed
 - `ai verify` run 2 failed `a block with a port in use is skipped` (expected 40130, got 40140). `freeBase()` picked bases in 20000–59900, which overlaps the kernel ephemeral range (32768–60999, same root cause as t1349), and probed only base..base+29 while the test reaches base+39, so a busy fourth block slipped through.
 - Fix: bases come from 15000…(ephemeral lo − 1000), all 40 ports are probed, and the test asserts base+40 ≤ lo. Sweep: the only random-port picker in tests/ scripts/ kit/tests. 10/10 isolated runs green; full gate green.
