@@ -21,12 +21,16 @@ function hold(port: number, host = '127.0.0.1'): Promise<boolean> {
   })
 }
 
-/** A base whose first three blocks are free right now (the test machine runs other things too). */
+/** A base whose first four blocks are free right now (the test machine runs other things too).
+ * Drawn below the kernel ephemeral range (same reason as t1349: any outgoing connection can grab a port in
+ * it between the probe and the assert) and probing every port the tests touch — the block test reaches
+ * base+39; probing only base+29 let a busy fourth block through (t1368 verify flake: 40130 -> 40140). */
 async function freeBase(): Promise<number> {
+  const top = ephemeralRange().lo - 1000
   for (let tries = 0; tries < 40; tries++) {
-    const base = 20000 + Math.floor(Math.random() * 400) * 100
+    const base = 15000 + Math.floor(Math.random() * Math.max(1, (top - 15000) / 100)) * 100
     let free = true
-    for (let port = base; port < base + 30 && free; port++) free = await isFree(port)
+    for (let port = base; port < base + 40 && free; port++) free = await isFree(port)
     if (free) return base
   }
   throw new Error('no free port range found for the test')
@@ -44,6 +48,7 @@ describe('kit gate ports', () => {
 
   it('a block with a port in use is skipped: the combo gets the next block, with a notice naming the busy port', async () => {
     const base = await freeBase()
+    expect(base + 40).toBeLessThanOrEqual(ephemeralRange().lo) // every port this test touches sits below the ephemeral range
     expect(await hold(base + 14)).toBe(true) // in the middle of the second block
     const skipped: unknown[] = []
     const ports = portBlocks({ base, size: 10, onSkip: (info: unknown) => skipped.push(info) })
