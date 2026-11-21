@@ -14,14 +14,17 @@ const REPO = join(KIT_ROOT, '..')
 describe('dogfood: the repo\'s own CI', () => {
   const workflow = readFileSync(join(REPO, '.github/workflows/gate.yml'), 'utf8')
 
-  it('.github/workflows/gate.yml is what `--with ci-github` generates for a project named nuxt-base (+ the browser install its e2e suite needs)', () => {
+  it('.github/workflows/gate.yml is what `--with ci-github` generates for a project named nuxt-base (+ the browser install and smoke run its e2e suite needs)', () => {
     const dir = join(tmp('dogfood'), 'app')
     expect(cli(['new', 'nuxt-base', '--kind', 'nuxt-app', '--with', 'ci-github', '--dir', dir, '--json']).status).toBe(0)
     const generated = read(dir, '.github/workflows/gate.yml')
     const extra = workflow.split('\n').filter((line) => !generated.split('\n').includes(line))
     expect(extra).toEqual([
-      "      # nuxt-base only: its gate runs the layer's playwright suite, which needs a browser on the runner.",
+      "      # nuxt-base only: its test:smoke step runs the layer's playwright suite, which needs a browser on the runner.",
       '      - run: npx playwright install --with-deps chromium',
+      '      # nuxt-base only: CI runs the T1 pair (GATE.md tiers) — gate is inside gate:ci, smoke here. The full suite',
+      '      # (gate:full + gate:kit) is the pre-release check on a dev machine / the weekly kit-gate job.',
+      '      - run: npm run test:smoke',
     ])
     expect(workflow.split('\n').filter((line) => !extra.includes(line)).join('\n')).toBe(generated)
   })

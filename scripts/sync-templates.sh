@@ -2,7 +2,7 @@
 # Mirror the layer's components to the copy-based template dir used by non-Nuxt Vue projects.
 # nuxt-base/app/components is the single source; ~/.dev-mem/templates/components is a verified mirror (cmp), like deploy-docker.sh.
 #   scripts/sync-templates.sh          copy layer → templates
-#   scripts/sync-templates.sh --check  exit 1 if any mirrored file differs (used by `npm test`)
+#   scripts/sync-templates.sh --check  exit 1 if any mirrored file differs (used by `npm run gate`)
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 src="$here/app/components"

@@ -69,13 +69,14 @@ node kit/bin/scaffold.mjs new my-app --kind nuxt-app --dir ../my-app && cd ../my
 ```bash
 npm install
 npm run dev          # playground on :3517
-npm test             # build playground → vitest (nuxt env) → playwright e2e (built app) → templates mirror check
-npm run gate         # typecheck + test (includes the kit's unit tests)
-npm run gate:kit     # kit: scaffold every kind/preset into a temp dir -> install -> gate -> build -> run
+npm run gate         # typecheck + lint + vitest (layer + kit unit tests) + templates mirror check — no build, no e2e
+npm run test:smoke   # build playground + @smoke e2e — the T1 pair with gate (GATE.md tiers; queue via heavy-run)
+npm run gate:full    # gate + playground build + all e2e — T2
+npm run gate:kit     # kit: scaffold every kind/preset into a temp dir -> install -> gate -> build -> run (through heavy-run)
 scripts/sync-templates.sh   # push component changes to ~/.dev-mem/templates/components (mirror for non-Nuxt Vue apps)
 node scripts/parity-shots.mjs shoot <url> <dir> / /page … && node scripts/parity-shots.mjs diff <before> <after> <out>   # migration proof
 git tag v0.x.y && git push --tags
 ```
 
 Rules: components change **here** (never in an app); after a release bump the tag in each app. Drift checks are jobs
-(templates mirror in `npm test`; app-side layer version check = next pilot step).
+(templates mirror in `npm run gate`; app-side layer version check = next pilot step).

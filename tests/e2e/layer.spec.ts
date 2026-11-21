@@ -7,7 +7,7 @@ function watchErrors(page: Page) {
   return errors
 }
 
-test('layer renders: tokens, components, async patterns, head defaults, no JS errors', async ({ page }) => {
+test('layer renders: tokens, components, async patterns, head defaults, no JS errors', { tag: ['@smoke'] }, async ({ page }) => {
   const errors = watchErrors(page)
   await page.goto('/')
   await expect(page.getByTestId('title')).toHaveText('nuxt-base playground')
@@ -52,7 +52,7 @@ test('layer renders: tokens, components, async patterns, head defaults, no JS er
   expect(errors).toEqual([])
 })
 
-test('error page from the layer renders for unknown routes', async ({ page }) => {
+test('error page from the layer renders for unknown routes', { tag: ['@smoke'] }, async ({ page }) => {
   const errors = watchErrors(page)
   await page.goto('/does-not-exist')
   await expect(page.getByRole('heading', { name: 'ไม่พบหน้านี้' })).toBeVisible()
@@ -62,13 +62,13 @@ test('error page from the layer renders for unknown routes', async ({ page }) =>
   expect(errors.filter((e) => !e.includes('404') && !e.includes('NUXT_E1005'))).toEqual([])
 })
 
-test('default favicon ships with the layer (apps without public/favicon.svg get no 404)', async ({ request }) => {
+test('default favicon ships with the layer (apps without public/favicon.svg get no 404)', { tag: ['@smoke'] }, async ({ request }) => {
   const res = await request.get('/favicon.svg')
   expect(res.status()).toBe(200)
   expect(await res.text()).toContain('<svg')
 })
 
-test('auth hook route answers 401 without proxy headers and a user with them', async ({ request }) => {
+test('auth hook route answers 401 without proxy headers and a user with them', { tag: ['@smoke'] }, async ({ request }) => {
   const anon = await request.get('/api/_me')
   expect(anon.status()).toBe(401)
   const me = await request.get('/api/_me', { headers: { 'x-authentik-username': 'not', 'x-authentik-email': 'n@x', 'x-authentik-groups': 'admins|dev' } })

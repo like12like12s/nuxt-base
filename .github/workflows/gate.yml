@@ -25,7 +25,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      # nuxt-base only: its gate runs the layer's playwright suite, which needs a browser on the runner.
+      # nuxt-base only: its test:smoke step runs the layer's playwright suite, which needs a browser on the runner.
       - run: npx playwright install --with-deps chromium
       # The secret scan is part of gate:ci, and in CI a missing gitleaks binary FAILS it (locally it is a notice).
       - name: install gitleaks (pinned release, checksum verified)
@@ -36,3 +36,6 @@ jobs:
           tar -xzf /tmp/gitleaks.tar.gz -C "$HOME/.local/bin" gitleaks
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: npm run gate:ci
+      # nuxt-base only: CI runs the T1 pair (GATE.md tiers) — gate is inside gate:ci, smoke here. The full suite
+      # (gate:full + gate:kit) is the pre-release check on a dev machine / the weekly kit-gate job.
+      - run: npm run test:smoke

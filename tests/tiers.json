@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "exclusive": true,
+  "map": {
+    "app/**": ["tests/e2e/layer.spec.ts"],
+    "playground/**": ["tests/e2e/layer.spec.ts"],
+    "server/**": ["tests/e2e/layer.spec.ts"],
+    "public/**": ["tests/e2e/layer.spec.ts"]
+  },
+  "fullOn": ["kit/**"]
+}
