@@ -4,7 +4,6 @@
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
 import { cleanup, KIT_ROOT, read, tmp } from './helpers'
 // @ts-expect-error plain ESM, no types
