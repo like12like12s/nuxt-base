@@ -27,7 +27,7 @@
 // Exit codes: 0 clean (warnings allowed), 1 findings, 2 usage (invalid tiers.json, missing catalog, ambiguous write).
 
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const CLOSED_TAGS = ['@smoke', '@layout', '@quarantine']
@@ -113,28 +113,46 @@ function gitRoot(startDir) {
   }
 }
 
+// Without a git toplevel (a fresh scaffold whose git init comes later), the repo root is inferred: the package dir
+// is the one holding <dir>/tests/tiers.json, and the root is the highest ancestor that still looks like the repo —
+// every step up has a package.json (fullstack: ui -> repo root; a root package stops at itself). Paths inside
+// tiers.json are repo-root-relative (ui/tests/e2e/...), so guessing the package dir as the root would drop the
+// ui/ prefix from discovery while the map keeps it — every spec would read as unreachable.
+function rootWithoutGit(pkgDir) {
+  let dir = resolve(pkgDir)
+  for (;;) {
+    const parent = dirname(dir)
+    if (parent === dir || !existsSync(join(parent, 'package.json'))) return dir
+    dir = parent
+  }
+}
+
 function locateTiers(cwd) {
-  const root = gitRoot(cwd)
-  const bases = [resolve(cwd), ...(root && root !== resolve(cwd) ? [root] : [])]
-  const files = []
+  const git = gitRoot(cwd)
+  const searchRoot = git ?? resolve(cwd)
+  const bases = [resolve(cwd), ...(git && git !== resolve(cwd) ? [git] : [])]
+  const found = []
   const seen = new Set()
   for (const base of bases) {
     for (const folder of ['tests', 'test']) {
       const file = join(base, folder, 'tiers.json')
-      if (existsSync(file) && !seen.has(file)) { seen.add(file); files.push({ file, pkg: relative(root ?? base, base) }) }
+      if (existsSync(file) && !seen.has(file)) { seen.add(file); found.push(file) }
     }
   }
-  if (!files.length && root) {
+  if (!found.length) {
     // Run from the repo root of a monorepo: one level down (ui/tests/tiers.json of a fullstack repo).
-    for (const entry of readdirSync(root, { withFileTypes: true })) {
+    for (const entry of readdirSync(searchRoot, { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue
       for (const folder of ['tests', 'test']) {
-        const file = join(root, entry.name, folder, 'tiers.json')
-        if (existsSync(file) && !seen.has(file)) { seen.add(file); files.push({ file, pkg: entry.name }) }
+        const file = join(searchRoot, entry.name, folder, 'tiers.json')
+        if (existsSync(file) && !seen.has(file)) { seen.add(file); found.push(file) }
       }
     }
   }
-  return { root: root ?? resolve(cwd), files }
+  const root = git ?? (found.length ? rootWithoutGit(dirname(dirname(found[0]))) : resolve(cwd))
+  // The package prefix comes from where the file sits, never from where the search started.
+  const files = found.map((file) => ({ file, pkg: relative(root, dirname(dirname(file))).split(sep).join('/') }))
+  return { root, files }
 }
 
 // --- tags ---------------------------------------------------------------------------------------------------

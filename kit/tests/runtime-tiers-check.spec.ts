@@ -13,9 +13,9 @@ const CHECKER = join(KIT_ROOT, 'runtime', 'testing', 'tiers-check.mjs')
 afterAll(cleanup)
 
 /** A throwaway repo: <root>/.git, the package at `pkg` ('' = root itself). */
-function repo(files: Record<string, string>, pkg = '') {
+function repo(files: Record<string, string>, pkg = '', withGit = true) {
   const root = tmp('tiers')
-  mkdirSync(join(root, '.git'), { recursive: true })
+  if (withGit) mkdirSync(join(root, '.git'), { recursive: true })
   for (const [path, content] of Object.entries(files)) {
     mkdirSync(dirname(join(root, pkg, path)), { recursive: true })
     writeFileSync(join(root, pkg, path), content)
@@ -45,6 +45,22 @@ describe('tiers-check: discovery and shape', () => {
     const r = run(root) // run from the root, not from ui/
     expect(r.exit, r.errors.join('; ')).toBe(0)
     expect(r.warnings).toEqual([])
+  })
+
+  it('no .git yet (fresh scaffold, git init comes later): the ui/ prefix still holds, from ui/ and from the root', () => {
+    const root = tmp('tiers')
+    const mk = (rel: string, content: string) => { mkdirSync(dirname(join(root, rel)), { recursive: true }); writeFileSync(join(root, rel), content) }
+    mk('package.json', JSON.stringify({ name: 'demo-app', private: true }))
+    mk('ui/package.json', JSON.stringify({ name: 'demo-app-ui', private: true }))
+    mk('ui/tests/tiers.json', tiersJson({ version: 1, map: { 'ui/app/**': ['ui/tests/e2e/app.spec.ts'] } }))
+    mk('ui/tests/e2e/app.spec.ts', spec('home renders'))
+    mk('ui/app/pages/index.vue', '<template />')
+    const fromUi = run(join(root, 'ui'))
+    expect(fromUi.exit, fromUi.errors.join('; ')).toBe(0)
+    expect(fromUi.specFiles).toEqual(['ui/tests/e2e/app.spec.ts'])
+    const fromRoot = run(root)
+    expect(fromRoot.exit, fromRoot.errors.join('; ')).toBe(0)
+    expect(fromRoot.specFiles).toEqual(['ui/tests/e2e/app.spec.ts'])
   })
 
   it('test/ is accepted when that is the project folder (tests/ first, then test/)', () => {
