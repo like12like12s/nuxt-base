@@ -4,6 +4,15 @@ description: Change history of nuxt-base (newest first)
 ---
 # nuxt-base — Changelog
 
+### t1444 — test tiers in the kit + the repo, queue helper in every playwright run
+- GATE.md tiers (t1438 wave 2, task #5). Repo scripts: `gate` = typecheck + lint + vitest + templates mirror (playground build + e2e moved OUT — the contract: no build artefacts, no browser); `test:smoke` = build + the 4 `@smoke` layer tests; `gate:full` = gate + all e2e; `npm test` composite dropped. `tests/tiers.json` (exclusive — e2e port 3518 fixed; map app/playground/server/public → layer.spec; **fullOn `kit/**`** so an ai-verify diff on the kit pulls T2 = `gate:full && gate:kit`).
+- Queue: `scripts/lib/heavy-run-global-setup.mjs` (copy of the t1441 helper, sanitized for the public repo — no host names) wired into the repo's own playwright config via globalSetup; smoke grep = light slot, full = heavy, bare `npx playwright test` queues too. Proved live (heavy-run log row for like12like12s/nuxt-base, light, at the smoke run).
+- **Playwright >= 1.45 wiring break found**: function `globalSetup` is rejected ("must be a string") — the ai-cli helper's documented wiring throws on 1.65 before any test runs. Working form: string path (default export runs) + bare import for the env side effect; no globalTeardown (process-exit hook releases). Told t1445/t1442; helper header doc updated in both copies.
+- Kit gate self-wraps heavy-run at startup (one heavy slot for the whole run; `HEAVY_RUN_HELD` passes the env filter so grandchildren — each combo's `npm run gate`, its playwright — stay out; `--list` skips; exit 75 = not run). The pulse kit-gate-weekly job and `ai verify` T2 inherit the queue for free.
+- Templates: nuxt-app/fullstack(ui) get `test:smoke` + `gate:full` scripts, `@smoke` on all 3 skeleton tests, locked `scripts/lib/heavy-run-global-setup.mjs`, `tests/tiers.json` (repo-root-relative map; `ui/` prefixes under fullstack via `@kit:if kind:fullstack` — the else-comma layout keeps both renders valid JSON); api kind gets `gate:full` (= gate + build, no e2e — script split alone). Kit gate: the plain nuxt-app combo proves the generated `npm run test:smoke` itself (build + grep + helper) instead of the raw runner.
+- Docs: README/usage.md (kinds + repo), UPGRADING.md 0.4.0→next by-hand steps for existing kit projects (scripts are app-owned), ai-verify lines → `gate && test:smoke` + `ai-verify-full: gate:full && gate:kit` (contract with t1445). CI keeps e2e coverage via `test:smoke` after gate:ci (browser install stays; dogfood extra-lines updated).
+- t1449 (tiers-check) coordinates: they add the checker + `node tests/kit/tiers-check.mjs` first in the generated gate chain from their branch; kinds' gate script unchanged in this task.
+
 ### t1368c — fresh-review round 1 (0🔴 5🟡): fixed 4, kept 1
 - IconButton header now states `class` is a layout-only contract (visual state goes through `variant`). The class-on-wrapper split stays (deliberate, matches agent-remote).
 - +1 unit test: `aria-expanded` flipped after mount (host component with a ref) reaches the control and hides the bubble. Fails on v0.5.4.

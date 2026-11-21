@@ -186,7 +186,8 @@ playbooks/              add-resource.md · add-page.md · add-job.md — copied 
 presets/deploy/<name>/  preset.json + files/         cf-pages · container · pm2
 runtime/                files copied byte for byte into apps and locked: runtime/<area>/* -> src/kit/<area>/*
                         (api · db · auth · trace · security · jobs · notify · testing; testing/e2e.ts -> the UI's
-                        tests/kit/, og/og.ts -> the UI's server/kit/, ui/api-error.ts -> the UI's app/utils/),
+                        tests/kit/, testing/heavy-run-global-setup.mjs -> the UI's scripts/lib/ (from the nuxt-app
+                        kind), og/og.ts -> the UI's server/kit/, ui/api-error.ts -> the UI's app/utils/),
                         project/gate-ci.mjs -> scripts/
 tests/                  *.spec.ts (unit, in `npm run gate`) · kit-gate.mjs + combos.mjs (`npm run gate:kit`)
 ```

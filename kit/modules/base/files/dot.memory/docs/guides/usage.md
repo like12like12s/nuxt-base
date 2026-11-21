@@ -11,6 +11,7 @@ description: How to run, test and deploy {{kit.name}}
 ```bash
 npm run gate        # typecheck -> lint (oxlint, warnings fail) -> unit tests. Before every push and every deploy.
 npm run gate:ci     # gate + gitleaks (skipped with a notice when the binary is absent) + npm audit --audit-level=high
+npm run gate:full   # the full tier (gate + build, and all e2e where the project has them) — before a release / nightly
 ```
 
 Secret scan: `gate:ci` scans the whole git history (`gitleaks detect`) and, on your machine, also what is not
