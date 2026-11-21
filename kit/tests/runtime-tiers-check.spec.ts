@@ -81,6 +81,16 @@ describe('tiers-check: discovery and shape', () => {
     expect(run(b.cwd).exit).toBe(2)
     const c = repo({ 'tests/tiers.json': tiersJson({ version: 1, map: { 'app/**': 'tests/e2e/app.spec.ts' } }) })
     expect(run(c.cwd).exit).toBe(2)
+    for (const bad of [
+      { version: 1, tags: '@fast' },
+      { version: 1, fullOn: 'auth/**' },
+      { version: 1, specs: {} },
+      { version: 1, flows: 7 },
+    ]) {
+      const r = run(repo({ 'tests/tiers.json': tiersJson(bad), 'app/pages/index.vue': '' }).cwd)
+      expect(r.exit, JSON.stringify(bad)).toBe(2)
+      expect(r.errors.join(' '), JSON.stringify(bad)).toMatch(/tiers\.json:/)
+    }
   })
 })
 
@@ -182,6 +192,32 @@ describe('tiers-check: 2 — closed tag set and @layout', () => {
     const plain = "expect(page.viewportSize()!.width).toBeGreaterThan(0)\n"
     const r = run(withSpec('size @smoke', plain).cwd)
     expect(r.exit, r.errors.join('; ')).toBe(0)
+  })
+
+  it('a mid-title tag is read the way Playwright reads it (any @token, not only trailing)', () => {
+    const r = run(withSpec('use @fast path here').cwd)
+    expect(r.exit).toBe(1)
+    expect(r.errors.join(' ')).toMatch(/@fast is outside the closed set/)
+    // the import line's '@playwright/test' is not a tag
+    const clean = run(withSpec('home renders @smoke').cwd)
+    expect(clean.exit, clean.errors.join('; ')).toBe(0)
+  })
+
+  it('a closed describe does not leak @layout onto a later top-level test', () => {
+    const { cwd } = repo({
+      'tests/tiers.json': tiersJson({ version: 1, map: { 'app/**': ['tests/e2e/app.spec.ts'] } }),
+      'tests/e2e/app.spec.ts': `import { test } from '@playwright/test'\ntest.describe('settings @layout', () => {\n  test('inner @smoke', () => {})\n})\ntest('top level @smoke', ({ page }, testInfo) => {\n  if (testInfo.project.name === 'mobile') return\n})\n`,
+      'app/pages/index.vue': '<template />',
+    })
+    const r = run(cwd)
+    expect(r.exit).toBe(1)
+    expect(r.errors.join(' ')).toMatch(/app\.spec\.ts:5 .*no @layout/) // line 5 = the top-level test
+    expect(r.errors.join(' ')).not.toMatch(/app\.spec\.ts:3 /) // the describe-covered inner test is clean
+  })
+
+  it('test.fail declarations are openers too; isMobile branches like browserName', () => {
+    const failing = run(withSpec('expectedly fails @smoke', '', "import { test } from '@playwright/test'\ntest.fail('expected @smoke', ({ page }, { isMobile }) => {\n  if (!isMobile) return\n})\n").cwd)
+    expect(failing.errors.join(' ')).toMatch(/no @layout/)
   })
 })
 
@@ -327,6 +363,14 @@ describe('tiers-check --write-map: the page→spec part of map from the flow cat
     const missing = repo({ 'tests/tiers.json': tiersJson({ version: 1, flows: 'tests/flows/none.mjs', map: {} }) })
     expect((await writeMap({ cwd: missing.cwd })).exit).toBe(2)
   })
+
+  it('run from the repo root: the post-write re-check keeps the ui/ prefix (no bogus "no spec files discovered")', async () => {
+    const t = tree()
+    const r = await writeMap({ cwd: t.root })
+    expect(r.exit, r.errors.join('; ')).toBe(0)
+    expect(r.notes.join(' ')).not.toMatch(/no spec files discovered/)
+    expect(r.notes.join(' ')).toMatch(/map: /)
+  })
 })
 
 describe('tiers-check: CLI', () => {
@@ -349,6 +393,32 @@ describe('tiers-check: CLI', () => {
     expect(fail.stdout).toMatch(/task\/version\/fix/)
     const asJson = spawnSync(process.execPath, [CHECKER, '--json'], { encoding: 'utf8', cwd: bad.cwd })
     expect(JSON.parse(asJson.stdout)).toMatchObject({ exit: 1 })
+  })
+
+  it('the script still runs (not silently exit 0) when its own path contains a space', () => {
+    const base = tmp('tiers')
+    const root = join(base, 'dir with space')
+    mkdirSync(join(root, 'tests/e2e'), { recursive: true })
+    mkdirSync(join(root, 'tests/kit'), { recursive: true })
+    writeFileSync(join(root, '.gitkeep'), '') // no .git: single-package fallback, cwd is the root
+    writeFileSync(join(root, 'tests/tiers.json'), tiersJson({ version: 1, map: {} }))
+    writeFileSync(join(root, 'tests/e2e/t1405-thing.spec.ts'), spec('orphan'))
+    writeFileSync(join(root, 'tests/kit/tiers-check.mjs'), readFileSync(CHECKER, 'utf8'))
+    const r = spawnSync(process.execPath, [join(root, 'tests/kit/tiers-check.mjs')], { encoding: 'utf8', cwd: root })
+    expect(r.status, r.stdout).toBe(1) // findings present — the guard must actually run
+    expect(r.stdout).toMatch(/spec not reachable/)
+  })
+
+  it('--init-baseline and --write-map work through the CLI dispatch', async () => {
+    const { cwd } = repo({
+      'tests/tiers.json': tiersJson({ version: 1, map: { 'app/**': ['tests/e2e/app.spec.ts', 'tests/e2e/t1405-old.spec.ts'] } }),
+      'tests/e2e/t1405-old.spec.ts': spec('legacy name'),
+      'tests/e2e/app.spec.ts': spec('home renders'),
+      'app/pages/index.vue': '<template />',
+    })
+    const r = spawnSync(process.execPath, [CHECKER, '--init-baseline'], { encoding: 'utf8', cwd })
+    expect(r.status, r.stdout).toBe(0)
+    expect(JSON.parse(readFileSync(join(cwd, 'tests/tiers.json'), 'utf8')).baseline).toContain('tests/e2e/t1405-old.spec.ts')
   })
 
   it('runs against this repo (nuxt-base) without crashing — dogfood', () => {

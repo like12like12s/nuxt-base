@@ -46,7 +46,7 @@ const BAD_STEM = [
 // the discriminator within one 3-line window (conditions wrap). A missed line only loses a tag on a test; a wrong
 // line would cost an unearned red gate, so the window stays small.
 const BRANCH_LINE = /\btest\s*\.\s*(?:skip|fixme)\s*\(|\bif\s*\(/
-const PROJECT_LINE = /\.project\s*\.\s*name|\bbrowserName\b|\bviewportSize\s*\(\)|\bviewport\s*\.\s*(?:width|height)/
+const PROJECT_LINE = /\.project\s*\.\s*name|\bbrowserName\b|\bviewportSize\s*\(\)|\bviewport\s*\.\s*(?:width|height)|\bisMobile\b/
 
 // --- glob -> RegExp (gitignore-style: `**` crosses directories, `*` and `?` stay inside one segment, `[a-z]`
 // character classes pass through; there are no braces in gitignore globs, so they are literals). Null = not a glob.
@@ -139,14 +139,13 @@ function locateTiers(cwd) {
       if (existsSync(file) && !seen.has(file)) { seen.add(file); found.push(file) }
     }
   }
-  if (!found.length) {
-    // Run from the repo root of a monorepo: one level down (ui/tests/tiers.json of a fullstack repo).
-    for (const entry of readdirSync(searchRoot, { withFileTypes: true })) {
-      if (!entry.isDirectory() || entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue
-      for (const folder of ['tests', 'test']) {
-        const file = join(searchRoot, entry.name, folder, 'tiers.json')
-        if (existsSync(file) && !seen.has(file)) { seen.add(file); found.push(file) }
-      }
+  // One level down too (ui/tests/tiers.json of a fullstack repo) — always, so a repo with tiers.json at the root
+  // AND in a sub-package has both checked when run from the root.
+  for (const entry of readdirSync(searchRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue
+    for (const folder of ['tests', 'test']) {
+      const file = join(searchRoot, entry.name, folder, 'tiers.json')
+      if (existsSync(file) && !seen.has(file)) { seen.add(file); found.push(file) }
     }
   }
   const root = git ?? (found.length ? rootWithoutGit(dirname(dirname(found[0]))) : resolve(cwd))
@@ -156,18 +155,22 @@ function locateTiers(cwd) {
 }
 
 // --- tags ---------------------------------------------------------------------------------------------------
-// Playwright tags: the option form `tag: '@smoke'` / `tag: ['@smoke', '@layout']`, and tags parsed from the end of
-// a title string ('signs in @smoke @layout'). Returns { tag, line }, deduped.
+// Playwright tags, two forms: the option `tag: '@smoke'` / `tag: ['@smoke', '@layout']`, and tags parsed from a
+// title string — Playwright reads EVERY @token anywhere in the title (title.match(/@[\S]+/g)), not only trailing
+// ones, so 'use @fast here' declares @fast. We mirror that on lines that declare a test (or set .tag), with a
+// slightly narrower token ([\w.-]+) so prose like 'a@b.com' only fires when Playwright's own parsing would too.
+// Returns { tag, line }, deduped.
+const TITLE_LINE = /\btest\s*[.(]|\bdescribe\s*[.(]|\.tag\s*\(/
 function tagsIn(text) {
   const found = new Map()
   text.split('\n').forEach((line, idx) => {
     const add = (tag) => found.set(`${idx + 1}:${tag}`, { tag, line: idx + 1 })
     for (const m of line.matchAll(/tag\s*:\s*(\[[^\]]*\]|'[^']*'|"[^"]*")/g)) {
-      for (const t of m[1].matchAll(/@([\w-]+)/g)) add(`@${t[1]}`)
+      for (const t of m[1].matchAll(/@([\w.-]+)/g)) add(`@${t[1]}`)
     }
+    if (!TITLE_LINE.test(line)) return
     for (const m of line.matchAll(/'([^']*)'|"([^"]*)"/g)) {
-      const tail = (m[1] ?? m[2] ?? '').match(/(?:^|\s)@[\w-]+(?:\s@[\w-]+)*\s*$/)
-      if (tail) for (const t of tail[0].matchAll(/@([\w-]+)/g)) add(`@${t[1]}`)
+      for (const t of (m[1] ?? m[2] ?? '').matchAll(/@([\w.-]+)/g)) add(`@${t[1]}`)
     }
   })
   return [...found.values()]
@@ -181,16 +184,53 @@ const branchesOnProjectOrViewport = (chunk) => {
   })
 }
 
-// Opener offsets of test declarations — chunk i runs to the next opener. `test.skip(`/`test.fixme(` declare a test
-// only when the first argument is the title string (`test.skip('known bad', ...)`); otherwise they are branch
-// statements inside a test (`test.skip(({ browserName }) => ...)`) and belong to its chunk.
+// Where the call opened at `from` closes — paren depth back to zero, skipping string literals and comments, so a
+// '(' in a title ('signs in (admin)') cannot fool the count. Used to find the describes that enclose a test: the
+// nested tests are arguments INSIDE the describe's parens.
+function callEnd(text, from) {
+  let depth = 0
+  let quote = null
+  let comment = null
+  for (let i = from; i < text.length; i++) {
+    const ch = text[i]
+    const next = text[i + 1]
+    if (comment === 'line') { if (ch === '\n') comment = null; continue }
+    if (comment === 'block') { if (ch === '*' && next === '/') { comment = null; i++ } continue }
+    if (quote) { if (ch === '\\') i++; else if (ch === quote) quote = null; continue }
+    if (ch === '/' && next === '/') { comment = 'line'; i++; continue }
+    if (ch === '/' && next === '*') { comment = 'block'; i++; continue }
+    if (ch === "'" || ch === '"' || ch === '`') { quote = ch; continue }
+    if (ch === '(') depth++
+    else if (ch === ')') { depth--; if (depth === 0) return i }
+  }
+  return text.length
+}
+
+// Test declarations: { index, isDescribe, headerEnd } — chunk i runs to the next opener. `test.skip(`/`test.fixme(`
+// declare a test only when the first argument is the title string (`test.skip('known bad', ...)`); otherwise they
+// are branch statements inside a test (`test.skip(({ browserName }) => ...)`) and belong to its chunk. A describe's
+// header (title + options, before its first nested declaration) is where ITS tags live.
 function testOpeners(text) {
   const openers = []
-  for (const m of text.matchAll(/\btest\s*(?:\.\s*(?:describe|only|skip|fixme)\s*)*\(/g)) {
-    if (/[.]\s*(?:skip|fixme)\s*\($/.test(m[0]) && !/^['"]/.test(text.slice(m.index + m[0].length).trimStart())) continue
-    openers.push(m.index)
+  for (const m of text.matchAll(/\btest\s*(?:\.\s*(?:describe|only|skip|fixme|fail)\s*)*\(/g)) {
+    if (/[.]\s*(?:skip|fixme|fail)\s*\($/.test(m[0]) && !/^['"]/.test(text.slice(m.index + m[0].length).trimStart())) continue
+    openers.push({ index: m.index, isDescribe: /[.]\s*describe\s*\($/.test(m[0]), callEnd: 0, headerEnd: text.length })
+  }
+  for (const o of openers) {
+    o.callEnd = callEnd(text, o.index)
+    const nextOpener = openers.find((other) => other.index > o.index)
+    o.headerEnd = Math.min(nextOpener ? nextOpener.index : text.length, o.callEnd)
   }
   return openers
+}
+
+// The describes whose call still encloses offset `at` — a describe's @layout covers the tests inside it, and ONLY
+// those: a closed describe does not leak coverage onto a later top-level test.
+function enclosingDescribes(text, openers, at) {
+  return openers.filter((o) => {
+    if (!o.isDescribe || o.index >= at) return false
+    return callEnd(text, o.index) > at
+  })
 }
 
 // --- the three checks (one tiers.json) ------------------------------------------------------------------------
@@ -216,6 +256,10 @@ function checkTiersFile({ root, file, pkg }) {
   if (!shape(Array.isArray(fullOnly) && fullOnly.every((s) => typeof s === 'string'), 'fullOnly must be an array of spec paths')) return { exit: 2, errors, warnings, notes, tiers: null }
   const baseline = tiers.baseline ?? []
   if (!shape(Array.isArray(baseline) && baseline.every((s) => typeof s === 'string'), 'baseline must be an array of spec paths')) return { exit: 2, errors, warnings, notes, tiers: null }
+  if (!shape(Array.isArray(tiers.tags ?? []) && (tiers.tags ?? []).every((t) => typeof t === 'string'), 'tags must be an array of tag strings')) return { exit: 2, errors, warnings, notes, tiers: null }
+  if (!shape(Array.isArray(tiers.fullOn ?? []) && (tiers.fullOn ?? []).every((g) => typeof g === 'string'), 'fullOn must be an array of source globs')) return { exit: 2, errors, warnings, notes, tiers: null }
+  if (!shape(tiers.specs === undefined || typeof tiers.specs === 'string' || (Array.isArray(tiers.specs) && tiers.specs.every((g) => typeof g === 'string')), 'specs must be a glob or an array of globs')) return { exit: 2, errors, warnings, notes, tiers: null }
+  if (!shape((tiers.flows === undefined || typeof tiers.flows === 'string') && (tiers.pages === undefined || typeof tiers.pages === 'string'), 'flows and pages must be paths')) return { exit: 2, errors, warnings, notes, tiers: null }
   if (errors.length) return { exit: 2, errors, warnings, notes, tiers: null }
 
   const allowed = new Set([...CLOSED_TAGS, ...(tiers.tags ?? []).map((t) => (String(t).startsWith('@') ? String(t) : `@${String(t)}`))])
@@ -233,10 +277,11 @@ function checkTiersFile({ root, file, pkg }) {
   for (const key of Object.keys(map)) {
     if (!matchGlob(root, key)?.length) warnings.push(at(`map key matches no file: ${key} (stale after a rename? warn only, never blocks)`))
   }
-  for (const spec of referenced) if (readText(root, spec) === null) warnings.push(at(`map names a spec that does not exist: ${spec}`))
+  for (const spec of referenced) if (readText(root, spec) === null) warnings.push(at(`map names a spec that does not exist: ${spec} (map values are plain paths, not globs)`))
   for (const spec of fullOnly) if (readText(root, spec) === null) warnings.push(at(`fullOnly names a spec that does not exist: ${spec}`))
 
-  // 2 — closed tag set; a test that branches on project/viewport carries @layout (its describe's tag covers it).
+  // 2 — closed tag set; a test that branches on project/viewport carries @layout (an ENCLOSING describe's tag
+  // covers it — a describe that already closed does not).
   for (const spec of specFiles) {
     const text = readText(root, spec)
     if (text === null) continue
@@ -245,14 +290,14 @@ function checkTiersFile({ root, file, pkg }) {
     }
     const openers = testOpeners(text)
     for (let i = 0; i < openers.length; i++) {
-      const chunk = text.slice(openers[i], openers[i + 1] ?? undefined)
+      const opener = openers[i]
+      const chunk = text.slice(opener.index, openers[i + 1] ? openers[i + 1].index : undefined)
       if (!branchesOnProjectOrViewport(chunk)) continue
       const taggedHere = tagsIn(chunk).some((t) => t.tag === '@layout')
-      const before = text.slice(0, openers[i])
-      const lastDescribe = before.lastIndexOf('test.describe')
-      const coveredAbove = lastDescribe >= 0 && tagsIn(text.slice(lastDescribe, openers[i])).some((t) => t.tag === '@layout')
+      const coveredAbove = enclosingDescribes(text, openers, opener.index)
+        .some((d) => tagsIn(text.slice(d.index, d.headerEnd)).some((t) => t.tag === '@layout'))
       if (!taggedHere && !coveredAbove) {
-        errors.push(at(`${spec}:${text.slice(0, openers[i]).split('\n').length} branches on the Playwright project or viewport but carries no @layout — without it T1 runs one viewport only`))
+        errors.push(at(`${spec}:${text.slice(0, opener.index).split('\n').length} branches on the Playwright project or viewport but carries no @layout — without it T1 runs one viewport only`))
       }
     }
   }
@@ -275,7 +320,11 @@ function checkTiersFile({ root, file, pkg }) {
 
 export function runTiersCheck({ cwd = process.cwd(), tiersFile = null } = {}) {
   const { root, files } = locateTiers(cwd)
-  const targets = tiersFile ? [{ file: resolve(cwd, tiersFile), pkg: relative(root, cwd) }] : files
+  // An explicit tiersFile keeps the same pkg rule as discovery: the prefix comes from the FILE's location, not from
+  // where the command ran (running --write-map from the repo root must not re-check with an empty prefix).
+  const targets = tiersFile
+    ? [{ file: resolve(cwd, tiersFile), pkg: relative(root, dirname(dirname(resolve(cwd, tiersFile)))).split(sep).join('/') }]
+    : files
   if (!targets.length) {
     return { exit: 0, errors: [], warnings: [], notes: ['no tests/tiers.json — tiers-check: nothing to check (a repo adopts tiers by adding one, GATE.md)'], root }
   }
@@ -303,7 +352,7 @@ async function loadCatalog(root, rel) {
     loaded = loaded.default ?? loaded.FLOWS ?? loaded.flows ?? loaded
   }
   const flows = Array.isArray(loaded) ? loaded : loaded?.flows ?? loaded?.personas?.flatMap((p) => p.flows ?? []) ?? null
-  if (!Array.isArray(flows) || flows.some((f) => !f?.id || !Array.isArray(f.pages))) {
+  if (!Array.isArray(flows) || flows.some((f) => typeof f?.id !== 'string' || !Array.isArray(f.pages) || f.pages.some((p) => typeof p !== 'string'))) {
     throw new Error(`catalog ${rel}: expected flows of { id, pages[] } — a flat array, { flows: [...] } or { personas: [{ flows: [...] }] }`)
   }
   return flows
@@ -392,6 +441,6 @@ async function main(argv) {
   return result.exit
 }
 
-if (process.argv[1] && import.meta.url === `file://${resolve(process.argv[1])}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   process.exit(await main(process.argv.slice(2)))
 }
