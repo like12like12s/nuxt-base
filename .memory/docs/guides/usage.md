@@ -46,5 +46,5 @@ git tag v0.1.1 && git push && git push --tags
 Then bump the tag in consumers (list in [context](../context/context.md)).
 
 ## Checks
-- `npm test` fails if `~/.dev-mem/templates/components` drifts from `app/components`.
+- `npm run gate` fails if `~/.dev-mem/templates/components` drifts from `app/components`.
 - e2e screenshot: `test-results/playground-index.png`.
