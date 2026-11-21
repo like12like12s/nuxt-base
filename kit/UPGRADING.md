@@ -32,8 +32,9 @@ scaffold update --show ui/tests/unit/auth-bridge.spec.ts > ui/tests/unit/auth-br
 - `ui/scripts/lib/heavy-run-global-setup.mjs` (locked, copied by `scaffold update`) and
   `ui/playwright.config.ts` (app-owned): wire the queue helper into the config — a bare import of the helper (its
   side effect sets the tier worker caps) plus the string
-  `globalSetup: './scripts/lib/heavy-run-global-setup.mjs'` (Playwright >= 1.45 accepts a path only), `reporters:
-  [...heavyRunReporters(), ['list']]` and `workers: Number(process.env.HEAVY_RUN_WORKERS) || undefined`
+  `globalSetup: './scripts/lib/heavy-run-global-setup.mjs'` (Playwright >= 1.45 accepts a path only),
+  `reporter: [...heavyRunReporters(), ['list']]` (SINGULAR — a plural `reporters:` key is silently ignored and the
+  queue then logs no counts) and `workers: Number(process.env.HEAVY_RUN_WORKERS) || undefined`
   (see `scaffold update --show ui/playwright.config.ts`). Every full playwright run then holds a slot in the
   host-wide heavy-run queue; exit 75 = queue full = not run.
 - `tests/kit/tiers-check.mjs` (every UI part, new locked file): the tier-contract guard. `scaffold update` copies

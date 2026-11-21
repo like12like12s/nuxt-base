@@ -1,30 +1,36 @@
 /**
  * heavy-run from Playwright: the whole run holds a slot in the host-wide queue
  * (t1441). Copy this file into your project (scripts/lib/) and wire it in
- * playwright.config.ts — the IMPORT is load-bearing, see step 1:
+ * playwright.config.ts — globalSetup is the FILE PATH (a function value throws
+ * "config.globalSetup must be a string" on Playwright >= 1.45, t1463), and the
+ * IMPORT is load-bearing, see step 1:
  *
- *   import { heavyRunReporters } from './scripts/lib/heavy-run-global-setup.mjs'   // side effect at import, step 1
+ *   import { heavyRunReporters } from './scripts/lib/heavy-run-global-setup.mjs'
  *   export default defineConfig({
- *     globalSetup: './scripts/lib/heavy-run-global-setup.mjs',   // a PATH (Playwright >= 1.45): its default export runs
- *     reporters: [...heavyRunReporters(), ['list']],
+ *     globalSetup: './scripts/lib/heavy-run-global-setup.mjs',
+ *     reporter: [...heavyRunReporters(), ['list']],
  *     workers: Number(process.env.HEAVY_RUN_WORKERS) || undefined,
  *   })
+ *
+ * The config key is `reporter` SINGULAR (an array): a plural `reporters:` key is
+ * silently ignored and the JSON report never gets written — the row lands in the
+ * queue log with no counts (t1463, found by the wiring test).
  *
  * 1. The import itself sets HEAVY_RUN_WORKERS / E2E_WORKERS (clamped to the
  *    tier cap: 4 heavy, 2 light) and HEAVY_RUN_JSON — because imports run
  *    BEFORE the config object is built, `workers:` and heavyRunReporters() in
  *    the same file see them. heavy-run itself is a CHILD of this process, so
  *    nothing it exports could ever reach this config (t1441 review).
- * 2. globalSetup (the default export; a function value stopped being accepted
- *    by Playwright 1.45+ — the config passes this file's PATH) takes the slot;
+ * 2. globalSetup (the default export, run from the PATH above) takes the slot;
  *    the holder is a watcher that exits when this process does (pid +
  *    starttime — a recycled pid must not hold the slot), so a killed run
- *    releases it.
- * 3. Process exit releases (globalSetup registers an exit hook — an explicit
- *    globalTeardown would need its own default-export file, which is not worth
- *    a second locked file); heavy-run survives the group-SIGTERM to log the row
- *    and read the JSON reporter you attached in step 1 (passed/failed/flaky
- *    land in the queue's SQLite log).
+ *    releases it. It RETURNS the release function: Playwright calls it at
+ *    teardown (earlier than process exit when a reporter holds the process
+ *    open); the process-exit hook stays as belt and braces. No globalTeardown
+ *    key is needed (t1463).
+ * 3. Teardown or process exit releases; heavy-run survives the group-SIGTERM
+ *    to log the row and read the JSON reporter you attached in step 1
+ *    (passed/failed/flaky land in the queue's SQLite log).
  *
  * The lock sits in globalSetup (like printq's e2e-lock) so it catches a bare
  * `npx playwright test` too, not just npm scripts.
@@ -33,8 +39,8 @@
  * anything else = heavy (2 slots, workers <= 4). Title-filter runs count as
  * heavy — the default is the safe side.
  *
- * Off the queue host (heavy-run not on PATH — machines the queue does not
- * serve) the import and globalSetup are no-ops: the run proceeds as it always did.
+ * Off the queue host (heavy-run not on PATH — machines the queue does not serve) the
+ * import and globalSetup are no-ops: the run proceeds as it always did.
  * HEAVY_RUN_HELD=1 (already inside heavy-run, e.g. gate:full -> test:e2e, or a
  * wrapped `heavy-run -- npx playwright test`) also no-ops — re-entrant.
  *
@@ -66,9 +72,11 @@ export function heavyRunTier(argv = process.argv.slice(2)) {
   return 'heavy'
 }
 
-/** JSON reporter pointed at the queue's slot, so heavy-run logs passed/failed/flaky. */
+/** JSON reporter pointed at the queue's slot, so heavy-run logs passed/failed/flaky.
+ *  Playwright wants [name, options] TUPLES — a bare {name, outputFile} object makes the
+ *  runner die with "config.reporter[0] must be a tuple" (t1463). */
 export function heavyRunReporters() {
-  return process.env.HEAVY_RUN_JSON ? [{ name: 'json', outputFile: process.env.HEAVY_RUN_JSON }] : []
+  return process.env.HEAVY_RUN_JSON ? [['json', { outputFile: process.env.HEAVY_RUN_JSON }]] : []
 }
 
 // --- import-time preparation (runs before the importing config builds its object) -----------
@@ -138,6 +146,8 @@ done`
   // from here inherit it, so nothing inside the run re-enters the queue.
   process.env.HEAVY_RUN_HELD = '1'
   process.on('exit', release) // belt and braces: a run that never calls teardown still frees the slot
+  return release // Playwright calls this at global teardown (t1463): the slot frees
+  // before process exit even when a reporter holds the process open
 }
 
 function release() {

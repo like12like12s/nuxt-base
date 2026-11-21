@@ -10,7 +10,7 @@ import { heavyRunReporters } from './scripts/lib/heavy-run-global-setup.mjs'
 const port = Number(process.env.NB_E2E_PORT) || 3518
 export default defineConfig({
   globalSetup: './scripts/lib/heavy-run-global-setup.mjs',
-  reporters: [...heavyRunReporters(), ['list']],
+  reporter: [...heavyRunReporters(), ['list']], // reporter SINGULAR — a plural key is silently ignored
   workers: Number(process.env.HEAVY_RUN_WORKERS) || undefined,
   testDir: 'tests/e2e',
   timeout: 30_000,

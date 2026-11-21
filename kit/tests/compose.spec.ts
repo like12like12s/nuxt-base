@@ -142,6 +142,8 @@ describe('new — test tiers', () => {
     expect(config).toContain("from './scripts/lib/heavy-run-global-setup.mjs'")
     expect(config).toContain("globalSetup: './scripts/lib/heavy-run-global-setup.mjs'")
     expect(config).toContain('workers: Number(process.env.HEAVY_RUN_WORKERS) || undefined')
+    expect(config).toContain("reporter: [...heavyRunReporters(), ['list']]") // SINGULAR — plural is silently ignored
+    expect(config).not.toContain('reporters:')
     const manifest = JSON.parse(read(dir, '.scaffold.json'))
     expect(Object.keys(manifest.locked)).toContain('scripts/lib/heavy-run-global-setup.mjs')
     const hashes = snapshot(dir)
