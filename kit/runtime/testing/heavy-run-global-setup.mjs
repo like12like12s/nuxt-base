@@ -48,11 +48,19 @@
  * report it as a pass or a fail (GATE.md).
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 
-/** Is this argument a spec file (not a title filter)? */
-const fileish = (a) => a.includes('/') || /\.(spec|test)\.[cm]?[jt]sx?$/i.test(a) || existsSync(a)
+/** Is this argument a spec file (not a title filter)? An existing DIRECTORY never
+ *  counts — it expands to every spec inside (price-compare's bare `playwright test`
+ *  hit existsSync('test') on the test/ dir and a FULL run took a light slot; a
+ *  slashed dir would do the same — t1463 r2). */
+const fileish = (a) => {
+  try {
+    if (statSync(a).isDirectory()) return false
+  } catch { /* not on disk: a path filter is still fileish by shape */ }
+  return a.includes('/') || /\.(spec|test)\.[cm]?[jt]sx?$/i.test(a) || existsSync(a)
+}
 
 /** 'light' for a smoke grep or a 1-3-file run, else 'heavy'. */
 export function heavyRunTier(argv = process.argv.slice(2)) {
@@ -68,6 +76,9 @@ export function heavyRunTier(argv = process.argv.slice(2)) {
       positional.push(a)
     }
   }
+  // the CLI subcommand ('test') is not a file argument: `playwright test` is the
+  // whole suite, heavy — even in a repo whose test/ dir makes 'test' look fileish
+  if (positional[0] === 'test') positional.shift()
   if (positional.length >= 1 && positional.length <= 3 && positional.every(fileish)) return 'light'
   return 'heavy'
 }
