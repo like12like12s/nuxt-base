@@ -1,5 +1,8 @@
 import { defineConfig } from '@playwright/test'
-import heavyGlobalSetup, { globalTeardown, heavyRunReporters } from './scripts/lib/heavy-run-global-setup.mjs'
+// The bare import is load-bearing: it runs at import time — before the config object below is built — and sets
+// HEAVY_RUN_WORKERS / HEAVY_RUN_JSON (tier caps + the queue's JSON report path). The string globalSetup (Playwright
+// >= 1.45 requires a path, whose default export is the setup) then takes the slot; release rides process exit.
+import { heavyRunReporters } from './scripts/lib/heavy-run-global-setup.mjs'
 
 // Runs against the BUILT app (npm run test:e2e / test:smoke build first) — the same artefact a deploy ships.
 // The port is this project's own (its UI port {{kit.uiPort}} + 10000 — no two projects share it); E2E_PORT overrides it.
@@ -7,8 +10,7 @@ import heavyGlobalSetup, { globalTeardown, heavyRunReporters } from './scripts/l
 // full suite a heavy one, and off the queue host (no heavy-run on PATH) it is a no-op.
 const port = Number(process.env.E2E_PORT) || {{kit.e2ePort}}
 export default defineConfig({
-  globalSetup: heavyGlobalSetup,
-  globalTeardown,
+  globalSetup: './scripts/lib/heavy-run-global-setup.mjs',
   reporters: [...heavyRunReporters(), ['list']],
   workers: Number(process.env.HEAVY_RUN_WORKERS) || undefined,
   testDir: 'tests/e2e',

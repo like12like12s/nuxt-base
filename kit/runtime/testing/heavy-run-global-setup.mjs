@@ -3,10 +3,9 @@
  * (t1441). Copy this file into your project (scripts/lib/) and wire it in
  * playwright.config.ts — the IMPORT is load-bearing, see step 1:
  *
- *   import heavyGlobalSetup, { globalTeardown, heavyRunReporters } from './scripts/lib/heavy-run-global-setup.mjs'
+ *   import { heavyRunReporters } from './scripts/lib/heavy-run-global-setup.mjs'   // side effect at import, step 1
  *   export default defineConfig({
- *     globalSetup: heavyGlobalSetup,
- *     globalTeardown,
+ *     globalSetup: './scripts/lib/heavy-run-global-setup.mjs',   // a PATH (Playwright >= 1.45): its default export runs
  *     reporters: [...heavyRunReporters(), ['list']],
  *     workers: Number(process.env.HEAVY_RUN_WORKERS) || undefined,
  *   })
@@ -16,12 +15,16 @@
  *    BEFORE the config object is built, `workers:` and heavyRunReporters() in
  *    the same file see them. heavy-run itself is a CHILD of this process, so
  *    nothing it exports could ever reach this config (t1441 review).
- * 2. globalSetup takes the slot; the holder is a watcher that exits when this
- *    process does (pid + starttime — a recycled pid must not hold the slot),
- *    so a killed run releases it.
- * 3. globalTeardown (or process exit) releases; heavy-run survives the
- *    group-SIGTERM to log the row and read the JSON reporter you attached in
- *    step 1 (passed/failed/flaky land in the queue's SQLite log).
+ * 2. globalSetup (the default export; a function value stopped being accepted
+ *    by Playwright 1.45+ — the config passes this file's PATH) takes the slot;
+ *    the holder is a watcher that exits when this process does (pid +
+ *    starttime — a recycled pid must not hold the slot), so a killed run
+ *    releases it.
+ * 3. Process exit releases (globalSetup registers an exit hook — an explicit
+ *    globalTeardown would need its own default-export file, which is not worth
+ *    a second locked file); heavy-run survives the group-SIGTERM to log the row
+ *    and read the JSON reporter you attached in step 1 (passed/failed/flaky
+ *    land in the queue's SQLite log).
  *
  * The lock sits in globalSetup (like printq's e2e-lock) so it catches a bare
  * `npx playwright test` too, not just npm scripts.

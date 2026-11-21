@@ -139,7 +139,7 @@ describe('new — test tiers', () => {
     // the queue helper: wired into the config, and locked (hash in .scaffold.json = the file as written)
     const config = read(dir, 'playwright.config.ts')
     expect(config).toContain("from './scripts/lib/heavy-run-global-setup.mjs'")
-    expect(config).toContain('globalSetup: heavyGlobalSetup')
+    expect(config).toContain("globalSetup: './scripts/lib/heavy-run-global-setup.mjs'")
     expect(config).toContain('workers: Number(process.env.HEAVY_RUN_WORKERS) || undefined')
     const manifest = JSON.parse(read(dir, '.scaffold.json'))
     expect(Object.keys(manifest.locked)).toContain('scripts/lib/heavy-run-global-setup.mjs')
@@ -161,7 +161,7 @@ describe('new — test tiers', () => {
         'ui/server/**': ['ui/tests/e2e/app.spec.ts'],
       },
     })
-    expect(read(dir, 'ui/playwright.config.ts')).toContain('globalSetup: heavyGlobalSetup')
+    expect(read(dir, 'ui/playwright.config.ts')).toContain("globalSetup: './scripts/lib/heavy-run-global-setup.mjs'")
     expect(read(dir, 'ui/tests/e2e/app.spec.ts')).toMatch(/tag: \['@smoke'\]/)
     // the api part has no tiers file: no e2e there, the tier split is the gate / gate:full scripts alone
     expect(existsSync(join(dir, 'api/tests/tiers.json'))).toBe(false)
