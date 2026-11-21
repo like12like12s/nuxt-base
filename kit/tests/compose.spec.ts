@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { spawnSync } from 'node:child_process'
 import { existsSync, lstatSync, readlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -157,8 +158,9 @@ describe('new — test tiers', () => {
       version: 1,
       exclusive: true,
       map: {
-        'ui/app/**': ['ui/tests/e2e/app.spec.ts'],
         'ui/server/**': ['ui/tests/e2e/app.spec.ts'],
+        'ui/server/utils/**': ['ui/tests/e2e/api.spec.ts'], // the api proxy spec the module ships is reachable
+        'ui/app/**': ['ui/tests/e2e/app.spec.ts'],
       },
     })
     expect(read(dir, 'ui/playwright.config.ts')).toContain("globalSetup: './scripts/lib/heavy-run-global-setup.mjs'")
@@ -166,6 +168,19 @@ describe('new — test tiers', () => {
     // the api part has no tiers file: no e2e there, the tier split is the gate / gate:full scripts alone
     expect(existsSync(join(dir, 'api/tests/tiers.json'))).toBe(false)
     expect(JSON.parse(read(dir, 'api/package.json')).scripts['gate:full']).toBe('npm run gate && npm run build')
+  })
+
+  it('module specs stay reachable: og adds its spec to the server glob, on both kinds', () => {
+    for (const [kind, prefix] of [['nuxt-app', ''], ['fullstack', 'ui/']] as const) {
+      const { dir } = scaffold(['--kind', kind, '--with', 'og'])
+      const tiers = JSON.parse(read(dir, `${prefix}tests/tiers.json`))
+      expect(tiers.map[`${prefix}server/**`], kind).toEqual([`${prefix}tests/e2e/app.spec.ts`, `${prefix}tests/e2e/og.spec.ts`])
+      // and the checker accepts the generated project as-is (run where the generated gate runs it)
+      const pkg = prefix ? join(dir, 'ui') : dir
+      spawnSync('git', ['init', '-q'], { cwd: dir }) // the checker's repo root is the git toplevel
+      const check = spawnSync(process.execPath, [join(pkg, 'tests/kit/tiers-check.mjs')], { cwd: pkg, encoding: 'utf8' })
+      expect(check.status, `${kind}: ${check.stdout}${check.stderr}`).toBe(0)
+    }
   })
 
   it('api alone: no smoke, no tiers.json — gate / gate:full is the whole tier split', () => {

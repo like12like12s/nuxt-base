@@ -3,11 +3,21 @@
   "exclusive": true,
   // @kit:if kind:fullstack
   "map": {
-    "ui/app/**": ["ui/tests/e2e/app.spec.ts"],
-    "ui/server/**": ["ui/tests/e2e/app.spec.ts"]
+    // @kit:if og
+    "ui/server/**": ["ui/tests/e2e/app.spec.ts", "ui/tests/e2e/og.spec.ts"],
+    // @kit:else
+    "ui/server/**": ["ui/tests/e2e/app.spec.ts"],
+    // @kit:end
+    // @kit:if api
+    "ui/server/utils/**": ["ui/tests/e2e/api.spec.ts"],
+    // @kit:end
+    "ui/app/**": ["ui/tests/e2e/app.spec.ts"]
   }
   // @kit:else
   "map": {
+    // @kit:if og
+    "server/**": ["tests/e2e/app.spec.ts", "tests/e2e/og.spec.ts"],
+    // @kit:end
     "app/**": ["tests/e2e/app.spec.ts"]
   }
   // @kit:end
