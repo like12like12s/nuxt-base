@@ -307,11 +307,35 @@ export async function cmdAdd(kit, opts) {
 
   for (const f of files) writeFileUnder(dir, f.path, f.content)
   for (const [path, content] of patched) writeFileUnder(dir, path, content)
+
+  // Tier map maintenance (GATE.md tiers): a generator that emits an e2e spec also names the source that pulls it,
+  // so tiers-check (first stage of the generated gate) stays green as the project grows. Entries are part-relative
+  // (default: the generator's own part); the pipeline prefixes the part dir — tiers.json paths are repo-root-relative
+  // — and records them in that part's tests/tiers.json. A project without one (pre-tier kit) gets a note, not a file.
+  const tiersFiles = []
+  const tierNotes = []
+  for (const t of out.tiers ?? []) {
+    const base = dirOf(t.part)
+    if (base === undefined) continue // this project has no such part — like a ui-only file in an api project
+    const tiersPath = posix.join(base, 'tests/tiers.json')
+    const abs = inside(dir, tiersPath)
+    if (!existsSync(abs)) { tierNotes.push(`${tiersPath || 'tests/tiers.json'}: not found — record "${t.key}" -> ${t.specs.join(', ')} in your tier map by hand (pre-tier project)`); continue }
+    let tiers = null
+    try { tiers = JSON.parse(readFileSync(abs, 'utf8')) } catch (e) { throw usageError(`add ${type} ${name}: ${tiersPath} is not valid JSON (${e.message}) — fix it by hand, then re-run`, 'tiers_json') }
+    if (!tiers || typeof tiers !== 'object' || Array.isArray(tiers) || !tiers.map || typeof tiers.map !== 'object' || Array.isArray(tiers.map)) {
+      throw usageError(`add ${type} ${name}: ${tiersPath} has no "map" object — fix it by hand, then re-run`, 'tiers_json')
+    }
+    tiers.map[posix.join(base, t.key)] = t.specs.map((spec) => posix.join(base, spec))
+    writeFileUnder(dir, tiersPath, `${JSON.stringify(tiers, null, 2)}\n`)
+    if (!tiersFiles.includes(tiersPath)) tiersFiles.push(tiersPath)
+  }
+
   return {
     exit: EXIT.OK,
     result: {
       ok: true, dir, type, name, generator: found.unit.name, files: files.map((f) => f.path), patched: [...patched.keys()],
-      next: [...(out.next ?? []), ...skipped.map((s) => `${s.path}: no \`kit:anchor ${s.anchor}\` there — if you want it, add by hand: ${s.insert.trim()}`)],
+      ...(tiersFiles.length ? { tiers: tiersFiles } : {}),
+      next: [...(out.next ?? []), ...skipped.map((s) => `${s.path}: no \`kit:anchor ${s.anchor}\` there — if you want it, add by hand: ${s.insert.trim()}`), ...tierNotes],
     },
   }
 }

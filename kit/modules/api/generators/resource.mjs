@@ -722,5 +722,13 @@ test('${k}: a record that does not exist shows the API error, not a blank page',
     ...(canPreview && !options?.og ? [`link preview: /${n.kebab}/<id> gets the site's generic preview. To show the record's name to crawlers (it is then visible to anyone who reaches the UI with a crawler user agent), add ${ogEntry} to RECORDS in ${parts.ui.dir || '.'}/server/og.ts — \`add resource --og\` does that`] : []),
     'npm run gate',
   ]
-  return { files, patches, next }
+  return {
+    files, patches, next,
+    // The tier map entry for the gate's tiers-check (GATE.md tiers): the resource's pages pull its e2e spec. part:
+    // 'ui' because that is where the pages and tests/tiers.json both live; the API side of the contract has its own
+    // contract tests in the api part.
+    ...(hasUi
+      ? { tiers: [{ part: 'ui', key: `app/pages/${n.kebab}/**`, specs: [`tests/e2e/${n.kebab}.spec.ts`] }] }
+      : {}),
+  }
 }

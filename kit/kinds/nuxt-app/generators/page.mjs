@@ -103,6 +103,9 @@ ${params.length ? `  await expect(page.getByTestId('params')).toHaveText('${para
       { path: file, content: page },
       { path: `tests/e2e/${slug}.spec.ts`, content: e2e },
     ],
+    // The tier map entry for the gate's tiers-check: the page pulls its own spec. A dynamic segment is written as
+    // `*` — as a glob, `[id]` would be a character class, not the literal file name (GATE.md tiers).
+    tiers: [{ key: file.replace(/\[[a-zA-Z][A-Za-z0-9]*\]/g, '*'), specs: [`tests/e2e/${slug}.spec.ts`] }],
     next: [`fill in ${file} (data, states) and extend tests/e2e/${slug}.spec.ts`, 'npm run gate', 'npm run test:e2e   # in the UI directory'],
   }
 }

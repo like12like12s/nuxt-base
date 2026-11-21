@@ -65,9 +65,12 @@ describe('add resource', () => {
     expect(read(dir, 'ui/app/pages/order-lines/index.vue')).toContain("useApi().GET('/api/v1/order-lines'")
     expect(read(dir, 'ui/app/pages/order-lines/index.vue')).toContain('<AsyncState :pending="pending" :error="error"')
 
-    // nothing else changed, no locked file was touched, and the next steps name the derived files
+    // nothing else changed (the tier map entry included — the resource's pages pull its spec), no locked file
+    // was touched, and the next steps name the derived files
     const after = snapshot(dir)
-    expect(Object.keys(before).filter((f) => after[f] !== before[f]).sort()).toEqual([...r.json.patched].sort())
+    expect(r.json.tiers).toEqual(['ui/tests/tiers.json'])
+    expect(JSON.parse(read(dir, 'ui/tests/tiers.json')).map['ui/app/pages/order-lines/**']).toEqual(['ui/tests/e2e/order-lines.spec.ts'])
+    expect(Object.keys(before).filter((f) => after[f] !== before[f]).sort()).toEqual([...r.json.patched, 'ui/tests/tiers.json'].sort())
     expect(cli(['check', dir, '--json']).json.clean).toBe(true)
     expect(r.json.next.join('\n')).toMatch(/npm run contract[\s\S]*npm run client[\s\S]*db:migrate -- up[\s\S]*npm run gate/)
   })

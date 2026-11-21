@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { cleanup, cli, cloneKit, read, tmp } from './helpers'
@@ -30,6 +30,47 @@ function kitWithGenerators() {
   writeFileSync(join(dir, 'generators/resource.mjs'), 'export default async ({ name, manifest }) => ({ files: [{ path: `docs/${name}.md`, content: `${manifest.kind}\\n` }, { path: `../escape.md`, content: `x` }] })\n')
   return kit
 }
+
+// GATE.md tiers (t1444): `add` maintains the tier map so the generated gate's tiers-check stage stays green.
+describe('add — tier map maintenance', () => {
+  it('page: the page file becomes the map key, its spec the value; a dynamic segment is *', () => {
+    const dir = project('nuxt-app')
+    expect(cli(['add', 'page', 'reports', '--dir', dir, '--json']).status).toBe(0)
+    expect(cli(['add', 'page', 'docs/[id]', '--dir', dir, '--json']).status).toBe(0)
+    const map = JSON.parse(read(dir, 'tests/tiers.json')).map
+    expect(map['app/pages/reports.vue']).toEqual(['tests/e2e/reports.spec.ts'])
+    expect(map['app/pages/docs/*.vue']).toEqual(['tests/e2e/docs-id.spec.ts']) // [id] would be a glob char class
+  })
+
+  it('fullstack: entries land in ui/tests/tiers.json, repo-root-relative; a resource maps its pages glob', () => {
+    const dir = project('fullstack', undefined, ['--with', 'db,auth,api'])
+    expect(cli(['add', 'page', 'reports', '--dir', dir, '--json']).status).toBe(0)
+    expect(cli(['add', 'resource', 'orders', '--dir', dir, '--json']).status).toBe(0)
+    const map = JSON.parse(read(dir, 'ui/tests/tiers.json')).map
+    expect(map['ui/app/pages/reports.vue']).toEqual(['ui/tests/e2e/reports.spec.ts'])
+    expect(map['ui/app/pages/orders/**']).toEqual(['ui/tests/e2e/orders.spec.ts'])
+  })
+
+  it('a project without tests/tiers.json (pre-tier kit): a note, never a new file', () => {
+    const dir = project('nuxt-app')
+    rmSync(join(dir, 'tests/tiers.json'))
+    const r = cli(['add', 'page', 'reports', '--dir', dir, '--json'])
+    expect(r.status).toBe(0)
+    expect(r.json.tiers).toBeUndefined()
+    expect(r.json.next.some((n: string) => /tests\/tiers\.json/.test(n) && /by hand/.test(n))).toBe(true)
+    expect(existsSync(join(dir, 'tests/tiers.json'))).toBe(false)
+  })
+
+  it('re-adding after a manual map edit keeps the entry deterministic (same key, same value)', () => {
+    const dir = project('nuxt-app')
+    expect(cli(['add', 'page', 'reports', '--dir', dir, '--json']).status).toBe(0)
+    const before = read(dir, 'tests/tiers.json')
+    rmSync(join(dir, 'app/pages/reports.vue'), { force: true }) // allow adding again
+    rmSync(join(dir, 'tests/e2e/reports.spec.ts'), { force: true })
+    expect(cli(['add', 'page', 'reports', '--dir', dir, '--json']).status).toBe(0)
+    expect(read(dir, 'tests/tiers.json')).toBe(before)
+  })
+})
 
 describe('add — generator dispatch', () => {
   it('a crashing generator is an internal error (exit 70), never exit 1 = drift', () => {
