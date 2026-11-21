@@ -228,6 +228,16 @@ describe('tiers-check: 3 — new spec file names vs baseline', () => {
     'app/pages/index.vue': '<template />',
   })
 
+  it('a version-like name that IS a page name passes (scaffold add page v2 -> tests/e2e/v2.spec.ts)', () => {
+    const { cwd } = repo({
+      'tests/tiers.json': tiersJson({ version: 1, map: { 'app/pages/v2.vue': ['tests/e2e/v2.spec.ts'] } }),
+      'tests/e2e/v2.spec.ts': spec('v2 page renders'),
+      'app/pages/v2.vue': '<template />',
+    })
+    const r = run(cwd)
+    expect(r.exit, r.errors.join('; ')).toBe(0)
+  })
+
   it('task / version / fix-round names are refused: t1405-accounts, v112-home, fix3, settings-v2', () => {
     for (const name of ['t1405-accounts.spec.ts', 'v112-home.spec.ts', 'fix3.spec.ts', 'settings-v2.spec.ts', 'round2.spec.ts']) {
       const r = run(withSpecNamed(name).cwd)
@@ -362,6 +372,29 @@ describe('tiers-check --write-map: the page→spec part of map from the flow cat
     expect((await writeMap({ cwd: noKey.cwd })).exit).toBe(2)
     const missing = repo({ 'tests/tiers.json': tiersJson({ version: 1, flows: 'tests/flows/none.mjs', map: {} }) })
     expect((await writeMap({ cwd: missing.cwd })).exit).toBe(2)
+  })
+
+  it('a page entry whose specs carry no flow id is PRESERVED (generators and hands wrote it), same-key entries union', async () => {
+    const { cwd } = tree()
+    // what `scaffold add page v2` leaves behind: a page entry + spec with no [Pn.Fm] id in the title
+    mkdirSync(join(cwd, 'app/pages'), { recursive: true })
+    writeFileSync(join(cwd, 'app/pages/v2.vue'), '<template />')
+    writeFileSync(join(cwd, 'tests/e2e/v2.spec.ts'), spec('v2 page renders'))
+    const before = JSON.parse(read(cwd, 'tests/tiers.json'))
+    before.map['app/pages/v2.vue'] = ['tests/e2e/v2.spec.ts']
+    before.map['app/pages/index.vue'] = ['tests/e2e/home.spec.ts'] // every spec flow-derived: regenerable
+    writeFileSync(join(cwd, 'tests/tiers.json'), tiersJson(before))
+    const r = await writeMap({ cwd })
+    expect(r.exit, r.errors.join('; ')).toBe(0)
+    const map = JSON.parse(read(cwd, 'tests/tiers.json')).map
+    expect(map['app/pages/v2.vue']).toEqual(['tests/e2e/v2.spec.ts']) // kept: no flow id anywhere
+    expect(map['src/server/**']).toEqual(['tests/e2e/search.spec.ts']) // hand-written outside pages, kept
+    expect(map['app/pages/index.vue']).toEqual(['tests/e2e/home.spec.ts']) // regenerated from flows
+    // same key from both sources unions instead of overwriting:
+    writeFileSync(join(cwd, 'tests/flows/catalog.mjs'), catalog.replace("pages: ['/'] },", "pages: ['/', '/v2'] },"))
+    const r2 = await writeMap({ cwd })
+    expect(r2.exit, r2.errors.join('; ')).toBe(0)
+    expect(JSON.parse(read(cwd, 'tests/tiers.json')).map['app/pages/v2.vue']).toEqual(['tests/e2e/home.spec.ts', 'tests/e2e/v2.spec.ts'])
   })
 
   it('run from the repo root: the post-write re-check keeps the ui/ prefix (no bogus "no spec files discovered")', async () => {
