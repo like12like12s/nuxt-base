@@ -32,8 +32,24 @@ const { values: flags } = parseArgs({
 })
 
 // Child processes get a clean npm environment: when this runs under `npm run`, npm_* variables of THIS repo would leak in.
+// HEAVY_* passes through on purpose: under the queue (below) every grandchild — a combo's `npm run gate`, its
+// playwright run, the globalSetup helper — must see HEAVY_RUN_HELD=1 and stay out of the queue (re-entrant).
 const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^npm_|^INIT_CWD$|^NODE_ENV$|^AI_KIT_DIR$|^PORT$|^HOST$|^DATABASE_URL$|^TEST_MYSQL_URL$|^DB_/.test(k)))
 env.CI = '1'
+
+// The kit gate is one of the host's heavy suites (GATE.md tiers): on a machine with heavy-run on PATH the whole run
+// re-execs under the host-wide queue — one heavy slot for every combo below, so 20+ installs and builds do not land
+// on top of another project's browser suite. HEAVY_RUN_HELD=1 (already inside a run) and `--list` (runs nothing)
+// skip the re-exec; off the queue host heavy-run is a pass-through. Exit 75 = queue full = the gate has NOT run —
+// retry, never report it as a pass or a failure.
+if (process.env.HEAVY_RUN_HELD !== '1' && !flags.list) {
+  const heavy = (spawnSync('bash', ['-c', 'command -v heavy-run'], { encoding: 'utf8' }).stdout || '').trim()
+  if (heavy) {
+    console.log('kit gate: entering the heavy-run queue')
+    const queued = spawnSync(heavy, ['--label', `kit-gate${flags.only ? ` (${flags.only})` : ''}`, '--', process.execPath, fileURLToPath(import.meta.url), ...process.argv.slice(2)], { stdio: 'inherit' })
+    process.exit(queued.status ?? 2)
+  }
+}
 env.NUXT_TELEMETRY_DISABLED = '1'
 
 // One extra job besides the combos: the kit's own data-layer / test-kit unit tests against MySQL.
@@ -326,8 +342,16 @@ async function gateCombo(combo, index) {
         if (!html.includes('<div id="__nuxt">')) throw new StepError('/ did not return the SPA shell')
       })
       if (combo.e2e && !flags['no-e2e']) {
-        begin('ui: playwright e2e')
-        await run(log, 'npx', ['playwright', 'test'], { cwd: uiDir, timeout: 300_000, extraEnv: { E2E_PORT: String(port + 2), WRANGLER_SEND_METRICS: 'false' } })
+        if (combo.smoke) {
+          // the generated T1 script itself (GATE.md tiers), not the raw runner: build + the @smoke grep + the
+          // heavy-run helper in globalSetup — a no-op here, HEAVY_RUN_HELD=1 from the kit gate's own queue slot
+          // covers the whole tree (re-entrant by design)
+          begin('ui: npm run test:smoke (build + @smoke e2e through the queue helper)')
+          await run(log, 'npm', ['run', 'test:smoke'], { cwd: uiDir, timeout: 420_000, extraEnv: { E2E_PORT: String(port + 2), WRANGLER_SEND_METRICS: 'false' } })
+        } else {
+          begin('ui: playwright e2e')
+          await run(log, 'npx', ['playwright', 'test'], { cwd: uiDir, timeout: 300_000, extraEnv: { E2E_PORT: String(port + 2), WRANGLER_SEND_METRICS: 'false' } })
+        }
       }
     }
 
