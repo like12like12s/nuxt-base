@@ -18,6 +18,11 @@ scaffold update --show ui/tests/unit/auth-bridge.spec.ts > ui/tests/unit/auth-br
 
 ## 0.4.0 -> next
 
+- `tests/kit/tiers-check.mjs` (every UI part, new locked file): the tier-contract guard. `scaffold update` copies
+  it; wire it into your gate yourself — make `ui/package.json` (or the root, kind `nuxt-app`) run
+  `node tests/kit/tiers-check.mjs && ` ahead of the existing `gate` chain. It no-ops (exit 0) until the project has
+  a `tests/tiers.json`; when you adopt tiers, run `node tests/kit/tiers-check.mjs --init-baseline` once so the spec
+  files that already exist are exempt from the naming rule.
 - `api/tests/app.spec.ts` (kind `api` and fullstack): the query-string marker in the request-log test is now
   `zz-secret-zz` instead of `abc`. The assertion `expect(...).not.toContain(...)` runs on a log line that also
   carries the random hex trace id — an `abc` marker matched a trace id containing `abc` (~0.7% of ids) and made the

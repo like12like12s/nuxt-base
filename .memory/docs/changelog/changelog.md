@@ -4,6 +4,13 @@ description: Change history of nuxt-base (newest first)
 ---
 # nuxt-base — Changelog
 
+### t1449 — tiers-check: the shared tier-contract guard + the page→spec map generator, shipped from base
+- New locked runtime `kit/runtime/testing/tiers-check.mjs` → `tests/kit/tiers-check.mjs` of every UI part (registered in the **base** module's new `ui` contribute, so it is there with or without testkit — tiers are default-on once a tiers.json exists). Zero-dep, runs no tests, no-ops (exit 0) while a repo has no tests/tiers.json (tests/ then test/, one level down from a repo root too; several tiers.json = all checked).
+- The 3 checks of the GATE.md contract: (1) every discovered spec reachable from `map` or listed in `fullOnly` (2) tags inside the closed set @smoke @layout @quarantine + declared `tags` — both the `tag:` option form and title-end tags — and a test branching on project/viewport (test.skip/fixme/if within a 3-line window; describe's @layout covers its tests; test.skip(cond) inside a test is a statement, not an opener) must carry @layout (3) spec files not in `baseline` are not named t1405-* / v112-* / fix3 / settings-v2 (tv-guide, nav2, cov19 pass). Unmatched map/fullOn glob or a stale map value = WARN, never red.
+- `--init-baseline` records current spec paths; `--write-map` regenerates the page→spec part of `map` from the flow catalog (`"flows"` key; .mjs/.js/.json, personas flattened; specs reference flows by `[P7.F3]` titles). Route→glob: dynamic leaf = `*` (whole filename — `[slug]` written out would be a glob char class), catch-all `**`, flat file wins, index folder when that is what exists, neither = flat + warn; keys under `pages` only, hand-written entries kept; empty entries omitted. All paths repo-root-relative (ui/ prefix of a fullstack), repo root = git toplevel.
+- t1444 wires `node tests/kit/tiers-check.mjs && ` into the generated gate chains in kind.json (separate commit, master); UPGRADING.md tells existing projects how to adopt. agent-remote (t1442) vendors the same file.
+- Tests: +26 in kit/tests/runtime-tiers-check.spec.ts (fixtures in tmp repos; glob `/**/` zero-segment case, tag forms, opener-vs-statement skip, baseline, monorepo prefix, CLI exit codes + --json); modules.spec asserts the new locked set + base-without-testkit. Unit 616 green, e2e 4 green, templates in sync, typecheck + oxlint clean; gate:kit via heavy-run.
+
 ### t1368c — fresh-review round 1 (0🔴 5🟡): fixed 4, kept 1
 - IconButton header now states `class` is a layout-only contract (visual state goes through `variant`). The class-on-wrapper split stays (deliberate, matches agent-remote).
 - +1 unit test: `aria-expanded` flipped after mount (host component with a ref) reaches the control and hides the bubble. Fails on v0.5.4.

@@ -347,6 +347,14 @@ local gate:ci implies a green hook, never the other way round. All modes share t
 false positive in an old commit stays ignored there by its fingerprint (see UPGRADING.md, 0.2.0 -> 0.3.0). `--with ci-github` adds a workflow
 running it: `npm ci`, actions pinned by commit SHA, gitleaks installed from a pinned release with its checksum.
 
+UI parts also get `tests/kit/tiers-check.mjs` (locked, from the base module): the fast guard of the test-tier
+contract (git-hooks `GATE.md`) — every e2e spec reachable from `tests/tiers.json` `map` or declared `fullOnly`, tags
+inside the closed set `@smoke @layout @quarantine`, new spec files not named after task/version/fix rounds. It runs
+no tests and no-ops (exit 0) while a repo has no tiers.json; `--init-baseline` records the existing spec names once
+at adoption, and `--write-map` regenerates the page→spec part of `map` from a flow catalog (`"flows"` key in
+tiers.json) so it is never hand-copied. An unmatched `map` glob warns but never blocks — a rename must not turn the
+gate red before tiers.json catches up.
+
 ## Modules: api · db · testkit
 
 `api` and `db` always come together (each requires the other) and bring `testkit`: the standard's audit trail, soft

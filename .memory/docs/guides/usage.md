@@ -30,6 +30,7 @@ npm run gate:kit                                                        # scaffo
 node kit/tests/kit-gate.mjs --only api --keep                           # one family, keep temp dirs
 ```
 - Contract, module/kind/preset authoring: `kit/README.md` · normally called through `ai scaffold` (ai-cli), not by hand.
+- Every UI part ships `tests/kit/tiers-check.mjs` (locked, base module): the test-tier guard of git-hooks `GATE.md` — 3 checks inside `gate`, `--init-baseline` / `--write-map` to maintain `tests/tiers.json`.
 - Fast kit unit tests run inside `npm run gate` (`kit/tests/*.spec.ts`); `gate:kit` is the slow proof and is part of `ai verify`.
 <!-- ai-verify: npm run gate && npm run gate:kit -->
 
