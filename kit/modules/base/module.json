@@ -1,10 +1,14 @@
 {
   "name": "base",
   "status": "ready",
-  "description": "Always included: README, .memory docs (brief, context, usage, changelog), .scaffold.json, gate + gate:ci (gitleaks, npm audit)",
+  "description": "Always included: README, .memory docs (brief, context, usage, changelog), .scaffold.json, gate + gate:ci (gitleaks, npm audit) + tiers-check (UI parts)",
   "kinds": ["nuxt-app", "api", "fullstack"],
   "requires": [],
   "contributes": {
+    "ui": {
+      "locked": [{ "from": "runtime/testing/tiers-check.mjs", "to": "tests/kit/tiers-check.mjs" }],
+      "usage": "usage-tiers.md"
+    },
     "project": {
       "package": {
         "scripts": { "gate:ci": "node scripts/gate-ci.mjs" }
