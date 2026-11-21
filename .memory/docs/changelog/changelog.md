@@ -4,6 +4,11 @@ description: Change history of nuxt-base (newest first)
 ---
 # nuxt-base — Changelog
 
+### t1449c — t1444's blind reviewer: 2 findings fixed (checker must not fight the kit generators)
+- `scaffold add page v2` generates tests/e2e/v2.spec.ts — a version-like stem that IS a page name. The naming rule now exempts a stem matching a real page file (app/pages/<stem>.vue or /index.vue): the rule hunts files named after tasks/fix rounds, not pages whose own name carries a number.
+- `--write-map` deleted page entries whose specs carry no flow id — exactly what `scaffold add page` writes, so the documented --write-map run reddened a gate the kit had just made green. Now an entry under pages survives when any of its specs has no catalog flow id (another source owns it); entries whose every spec is flow-id'd are regenerated; same-key entries union instead of overwriting.
+- Found by the second fix's test: Node's ES-module cache served the first catalog import forever inside one process — the loader now imports with an mtime query.
+
 ### t1449b — fresh-review round 1 (1🔴 6🟡): all 7 fixed
 - 🔴 CLI main-guard compared import.meta.url to a hand-built file:// string — a script path with a space/# never matched, so `node tests/kit/tiers-check.mjs` silently exited 0 with findings present. Now pathToFileURL. (+ test: script copied into a spaced dir must exit 1.)
 - 🟡s: shape validation of tags/fullOn/specs/flows/pages (a `"tags": "@fast"` typo was a TypeError stack, `"fullOn": "…"` warned per character — now exit 2 with a message) · title tags read everywhere in the literal the way Playwright does (mid-title `@fast` was a silent bypass; import-line '@playwright/test' excluded) · @layout describe coverage is paren-aware with string/comment skipping — a CLOSED describe no longer covered a later top-level branchy test · `test.fail('title')` declarations are openers · `isMobile` counts as a project discriminator · write-modes from the repo root keep the file's pkg (no bogus "no spec files discovered" note) · one-level-down scan always runs (root + sub-package tiers.json both checked from the root).

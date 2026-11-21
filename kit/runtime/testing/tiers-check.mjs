@@ -26,7 +26,7 @@
 //
 // Exit codes: 0 clean (warnings allowed), 1 findings, 2 usage (invalid tiers.json, missing catalog, ambiguous write).
 
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -306,7 +306,12 @@ function checkTiersFile({ root, file, pkg }) {
   for (const spec of specFiles) {
     if (baseline.includes(spec)) continue
     const stem = spec.split('/').pop().replace(SPEC_EXT, '')
-    if (BAD_STEM.some((re) => re.test(stem))) errors.push(at(`spec file name "${stem}" looks like a task/version/fix name — name it after the module or page; names that predate tiers go in baseline`))
+    // A spec named after a PAGE that is genuinely version-like (app/pages/v2.vue -> tests/e2e/v2.spec.ts, what
+    // `scaffold add page v2` generates) is page-named, not task-named: the rule hunts files named after tasks and
+    // fix rounds, not pages whose own name carries a number.
+    const pagesDir = tiers.pages ?? `${pkg ? `${pkg}/` : ''}app/pages`
+    const namesAPage = existsSync(join(root, pagesDir, `${stem}.vue`)) || existsSync(join(root, pagesDir, stem, 'index.vue'))
+    if (!namesAPage && BAD_STEM.some((re) => re.test(stem))) errors.push(at(`spec file name "${stem}" looks like a task/version/fix name — name it after the module or page; names that predate tiers go in baseline`))
   }
   for (const old of baseline) if (!specFiles.includes(old)) warnings.push(at(`baseline entry is not a spec anymore: ${old} (prune with --init-baseline)`))
 
@@ -348,7 +353,9 @@ async function loadCatalog(root, rel) {
   let loaded
   if (abs.endsWith('.json')) loaded = JSON.parse(readFileSync(abs, 'utf8'))
   else {
-    loaded = await import(pathToFileURL(abs).href)
+    // The mtime query defeats Node's module cache: two --write-map runs in one process (tests, long-lived tools)
+    // must see a catalog that changed between them, not the first import forever.
+    loaded = await import(`${pathToFileURL(abs).href}?mtime=${statSync(abs).mtimeMs}`)
     loaded = loaded.default ?? loaded.FLOWS ?? loaded.flows ?? loaded
   }
   const flows = Array.isArray(loaded) ? loaded : loaded?.flows ?? loaded?.personas?.flatMap((p) => p.flows ?? []) ?? null
@@ -404,13 +411,21 @@ export async function writeMap({ cwd = process.cwd() } = {}) {
   }
   // A page no spec covers pulls nothing — an empty entry would only be noise. (The flow's own coverage is the
   // project's flows test to enforce, not the map's.)
-  // Replace only this pages dir's entries; hand-written keys (components, server/**, ...) survive untouched.
-  const kept = Object.fromEntries(Object.entries(tiers.map ?? {}).filter(([k]) => !k.startsWith(`${pagesDir}/`)))
-  const written = Object.fromEntries([...generated].filter(([, specs]) => specs.length).sort(([a], [b]) => (a < b ? -1 : 1)))
-  tiers.map = { ...kept, ...written }
+  // Under the pages dir, an OLD entry survives when any of its specs carries no flow id: that entry came from
+  // another source (a scaffold generator, a hand) and the flow catalog — the single source only for flow-id'd
+  // specs — would silently delete it. Entries whose every spec is flow-id'd are superseded by the generated ones.
+  const idAt = flows.map((f) => new RegExp(`\\[${escapeRegExp(f.id)}\\]`))
+  const flowDerived = (spec) => idAt.some((re) => re.test(texts.get(spec) ?? ''))
+  const oldEntries = Object.entries(tiers.map ?? {})
+  const kept = oldEntries.filter(([k, specs]) => !k.startsWith(`${pagesDir}/`) || specs.some((s) => !flowDerived(s)))
+  const written = [...generated].filter(([, specs]) => specs.length).sort(([a], [b]) => (a < b ? -1 : 1))
+  const mergedMap = Object.fromEntries(kept)
+  for (const [key, specs] of written) mergedMap[key] = [...new Set([...(mergedMap[key] ?? []), ...specs])].sort()
+  tiers.map = Object.fromEntries(Object.entries(mergedMap).sort(([a], [b]) => (a < b ? -1 : 1)))
   writeFileSync(tiersFile, `${JSON.stringify(tiers, null, 2)}\n`)
   const after = runTiersCheck({ cwd, tiersFile })
-  return { ...after, warnings: [...genWarnings, ...after.warnings], notes: [`map: ${Object.keys(written).length} page entries generated from ${flows.length} flows, ${Object.keys(kept).length} hand-written entries kept (flows: ${tiers.flows})`, ...after.notes] }
+  const note = `map: ${written.length} page entries generated from ${flows.length} flows, ${kept.filter(([k]) => !k.startsWith(`${pagesDir}/`)).length} hand-written + ${kept.filter(([k]) => k.startsWith(`${pagesDir}/`)).length} non-flow page entries kept (flows: ${tiers.flows})`
+  return { ...after, warnings: [...genWarnings, ...after.warnings], notes: [note, ...after.notes] }
 }
 
 export function initBaseline({ cwd = process.cwd() } = {}) {
