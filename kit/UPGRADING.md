@@ -26,15 +26,21 @@ scaffold update --show ui/tests/unit/auth-bridge.spec.ts > ui/tests/unit/auth-br
   - kind `api`: `"gate:full": "npm run gate && npm run build"`.
   - fullstack root: `"test:smoke": "npm run test:smoke --prefix ui"` and
     `"gate:full": "npm run gate:full --prefix api && npm run gate:full --prefix ui"`.
-  - `gate` itself is unchanged (typecheck + lint + unit — no build, no e2e, as before).
 - `ui/tests/tiers.json` (new, app-owned — a file you do not have yet): take it from
   `scaffold update --show ui/tests/tiers.json > ui/tests/tiers.json` (single-part kinds: without the `ui/` prefix),
   then extend `map` with your own pages/components as you add e2e specs.
 - `ui/scripts/lib/heavy-run-global-setup.mjs` (locked, copied by `scaffold update`) and
-  `ui/playwright.config.ts` (app-owned): wire the queue helper into the config — globalSetup + globalTeardown +
-  `reporters: [...heavyRunReporters(), ['list']]` + `workers: Number(process.env.HEAVY_RUN_WORKERS) || undefined`
+  `ui/playwright.config.ts` (app-owned): wire the queue helper into the config — a bare import of the helper (its
+  side effect sets the tier worker caps) plus the string
+  `globalSetup: './scripts/lib/heavy-run-global-setup.mjs'` (Playwright >= 1.45 accepts a path only), `reporters:
+  [...heavyRunReporters(), ['list']]` and `workers: Number(process.env.HEAVY_RUN_WORKERS) || undefined`
   (see `scaffold update --show ui/playwright.config.ts`). Every full playwright run then holds a slot in the
   host-wide heavy-run queue; exit 75 = queue full = not run.
+- `tests/kit/tiers-check.mjs` (every UI part, new locked file): the tier-contract guard. `scaffold update` copies
+  it; wire it into your gate yourself — make `ui/package.json` (or the root, kind `nuxt-app`) run
+  `node tests/kit/tiers-check.mjs && ` ahead of the existing `gate` chain, and run
+  `node tests/kit/tiers-check.mjs --init-baseline` once so the spec files that already exist are exempt from the
+  naming rule. It no-ops (exit 0) in a project without a `tests/tiers.json`.
 - `api/tests/app.spec.ts` (kind `api` and fullstack): the query-string marker in the request-log test is now
   `zz-secret-zz` instead of `abc`. The assertion `expect(...).not.toContain(...)` runs on a log line that also
   carries the random hex trace id — an `abc` marker matched a trace id containing `abc` (~0.7% of ids) and made the

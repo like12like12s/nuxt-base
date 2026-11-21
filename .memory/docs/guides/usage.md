@@ -36,6 +36,7 @@ node kit/tests/kit-gate.mjs --only api --keep                           # one fa
 - Contract, module/kind/preset authoring: `kit/README.md` · normally called through `ai scaffold` (ai-cli), not by hand.
 - Fast kit unit tests run inside `npm run gate` (`kit/tests/*.spec.ts`); `gate:kit` is the slow T2 proof (runs when a diff touches `kit/**` — fullOn in `tests/tiers.json`).
 - Generated apps get the same tiers: `gate` (no e2e/build) / `test:smoke` (build + `@smoke` grep) / `gate:full`, the queue helper as a locked file (`scripts/lib/`), and `tests/tiers.json` (exclusive, map → the e2e skeleton). api kinds: `gate` / `gate:full` only.
+- Every UI part ships `tests/kit/tiers-check.mjs` (locked, base module): the test-tier guard of git-hooks `GATE.md` — 3 checks inside `gate`, `--init-baseline` / `--write-map` to maintain `tests/tiers.json`.
 <!-- ai-verify: npm run gate && npm run test:smoke -->
 <!-- ai-verify-full: npm run gate:full && npm run gate:kit -->
 

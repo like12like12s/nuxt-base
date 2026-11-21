@@ -127,7 +127,7 @@ describe('new — test tiers', () => {
   it('nuxt-app: gate = typecheck + lint + unit, smoke/full scripts, @smoke-tagged skeleton, tiers.json, queue helper wired and locked', () => {
     const { dir } = scaffold(['--kind', 'nuxt-app'])
     const pkg = JSON.parse(read(dir, 'package.json'))
-    expect(pkg.scripts.gate).toBe('npm run typecheck && npm run lint && npm run test') // no build, no playwright
+    expect(pkg.scripts.gate).toBe('node tests/kit/tiers-check.mjs && npm run typecheck && npm run lint && npm run test') // tiers-check first, no build, no playwright
     expect(pkg.scripts['test:smoke']).toBe('npm run build && playwright test --grep @smoke')
     expect(pkg.scripts['gate:full']).toBe('npm run gate && npm run test:e2e')
     expect(JSON.parse(read(dir, 'tests/tiers.json'))).toEqual({
@@ -589,7 +589,10 @@ describe('lint step of the generated gate', () => {
     for (const part of parts) {
       const pkg = JSON.parse(read(dir, `${part}package.json`))
       expect(pkg.scripts.lint, part).toBe('oxlint --deny-warnings')
-      expect(pkg.scripts.gate, part).toBe('npm run typecheck && npm run lint && npm run test')
+      // ui parts open the gate with tiers-check (the tier-contract guard, t1449); the api has no tiers.json, no stage
+      expect(pkg.scripts.gate, part).toBe(part === 'ui/' || kind === 'nuxt-app'
+        ? 'node tests/kit/tiers-check.mjs && npm run typecheck && npm run lint && npm run test'
+        : 'npm run typecheck && npm run lint && npm run test')
       expect(pkg.devDependencies.oxlint, part).toBeTruthy()
       expect(JSON.parse(read(dir, `${part}.oxlintrc.json`)).ignorePatterns, part).toEqual(expect.arrayContaining(['.nuxt', '.output', 'dist', 'node_modules']))
     }
