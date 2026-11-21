@@ -4,6 +4,11 @@ description: Change history of nuxt-base (newest first)
 ---
 # nuxt-base — Changelog
 
+### t1444b — tiers-check wired into the generated gate (t1449 merge) + module-spec map fix
+- Merged `t1449-tiers-check` (9ed30fa + 3ac3c1f) and wired `node tests/kit/tiers-check.mjs && ` first in the nuxt-app kind's ui gate (both kinds' ui parts get it; api kind stays without — no tiers.json there). Fresh-app proof: scaffold → checker exit 0 against the generated tiers.json.
+- The first post-merge kit gate caught a real gap (19/21): og combos ship `tests/e2e/og.spec.ts` with no map entry → "spec not reachable" → gate red. Template fix: `server/**` → `[app.spec, og.spec]` when og (both kinds), `ui/server/utils/**` → the api proxy spec under fullstack+api. All 5 variants render valid JSON, checker exit 0 on each.
+- Edge reported to t1449: without a git toplevel (fresh project before `git init`, or no gitleaks in the kit gate) the checker loses the `ui/` pkg prefix → fullstack first gate would be red; nuxt-app at root unaffected. Fix belongs to the checker.
+
 ### t1444 — test tiers in the kit + the repo, queue helper in every playwright run
 - GATE.md tiers (t1438 wave 2, task #5). Repo scripts: `gate` = typecheck + lint + vitest + templates mirror (playground build + e2e moved OUT — the contract: no build artefacts, no browser); `test:smoke` = build + the 4 `@smoke` layer tests; `gate:full` = gate + all e2e; `npm test` composite dropped. `tests/tiers.json` (exclusive — e2e port 3518 fixed; map app/playground/server/public → layer.spec; **fullOn `kit/**`** so an ai-verify diff on the kit pulls T2 = `gate:full && gate:kit`).
 - Queue: `scripts/lib/heavy-run-global-setup.mjs` (copy of the t1441 helper, sanitized for the public repo — no host names) wired into the repo's own playwright config via globalSetup; smoke grep = light slot, full = heavy, bare `npx playwright test` queues too. Proved live (heavy-run log row for like12like12s/nuxt-base, light, at the smoke run).
