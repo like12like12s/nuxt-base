@@ -4,6 +4,9 @@ description: Change history of nuxt-base (newest first)
 ---
 # nuxt-base — Changelog
 
+### t1444c — add maintains the tier map (fixes the 2nd kit-gate red)
+- 2nd clean kit gate: still 19/21, new failures — `scaffold add page/resource` emits e2e specs with no map entry → the wired tiers-check refuses the gate during the playbook/add-resource steps. Fix: generators return `tiers` entries (`{ key, specs }`, part-relative); the add pipeline (commands.mjs) prefixes the part dir and records them in that part's `tests/tiers.json` — repo-root-relative per GATE.md. Dynamic segment → `*` (`[id]` is a glob char class). No tiers.json (pre-tier project) → note in `next[]`, never a new file. Proven: fullstack add page + resource + dynamic page all leave the checker at exit 0; re-add is deterministic.
+
 ### t1444b — tiers-check wired into the generated gate (t1449 merge) + module-spec map fix
 - Merged `t1449-tiers-check` (9ed30fa + 3ac3c1f) and wired `node tests/kit/tiers-check.mjs && ` first in the nuxt-app kind's ui gate (both kinds' ui parts get it; api kind stays without — no tiers.json there). Fresh-app proof: scaffold → checker exit 0 against the generated tiers.json.
 - The first post-merge kit gate caught a real gap (19/21): og combos ship `tests/e2e/og.spec.ts` with no map entry → "spec not reachable" → gate red. Template fix: `server/**` → `[app.spec, og.spec]` when og (both kinds), `ui/server/utils/**` → the api proxy spec under fullstack+api. All 5 variants render valid JSON, checker exit 0 on each.
