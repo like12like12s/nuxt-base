@@ -305,15 +305,15 @@ export async function cmdAdd(kit, opts) {
     patched.set(p.path, lines.join('\n'))
   }
 
-  for (const f of files) writeFileUnder(dir, f.path, f.content)
-  for (const [path, content] of patched) writeFileUnder(dir, path, content)
-
   // Tier map maintenance (GATE.md tiers): a generator that emits an e2e spec also names the source that pulls it,
   // so tiers-check (first stage of the generated gate) stays green as the project grows. Entries are part-relative
   // (default: the generator's own part); the pipeline prefixes the part dir — tiers.json paths are repo-root-relative
   // — and records them in that part's tests/tiers.json. A project without one (pre-tier kit) gets a note, not a file.
+  // Read and validated HERE, before any byte is written: a broken tiers.json must stop the command with the project
+  // untouched — after a partial write, the told re-run would die on "<file> already exists" (fresh-review r1 #3).
   const tiersFiles = []
   const tierNotes = []
+  const tiersWrites = []
   for (const t of out.tiers ?? []) {
     const base = dirOf(t.part)
     if (base === undefined) continue // this project has no such part — like a ui-only file in an api project
@@ -326,9 +326,13 @@ export async function cmdAdd(kit, opts) {
       throw usageError(`add ${type} ${name}: ${tiersPath} has no "map" object — fix it by hand, then re-run`, 'tiers_json')
     }
     tiers.map[posix.join(base, t.key)] = t.specs.map((spec) => posix.join(base, spec))
-    writeFileUnder(dir, tiersPath, `${JSON.stringify(tiers, null, 2)}\n`)
+    tiersWrites.push([tiersPath, `${JSON.stringify(tiers, null, 2)}\n`])
     if (!tiersFiles.includes(tiersPath)) tiersFiles.push(tiersPath)
   }
+
+  for (const f of files) writeFileUnder(dir, f.path, f.content)
+  for (const [path, content] of patched) writeFileUnder(dir, path, content)
+  for (const [path, content] of tiersWrites) writeFileUnder(dir, path, content)
 
   return {
     exit: EXIT.OK,

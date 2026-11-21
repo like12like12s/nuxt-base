@@ -32,9 +32,11 @@ const { values: flags } = parseArgs({
 })
 
 // Child processes get a clean npm environment: when this runs under `npm run`, npm_* variables of THIS repo would leak in.
-// HEAVY_* passes through on purpose: under the queue (below) every grandchild — a combo's `npm run gate`, its
-// playwright run, the globalSetup helper — must see HEAVY_RUN_HELD=1 and stay out of the queue (re-entrant).
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^npm_|^INIT_CWD$|^NODE_ENV$|^AI_KIT_DIR$|^PORT$|^HOST$|^DATABASE_URL$|^TEST_MYSQL_URL$|^DB_/.test(k)))
+// HEAVY_RUN_HELD passes through on purpose: under the queue (below) every grandchild — a combo's `npm run gate`, its
+// playwright run, the globalSetup helper — must see it and stay out of the queue (re-entrant). HEAVY_RUN_JSON does
+// NOT pass: it points at the slot's report file for THIS run — with it inherited, every concurrent combo e2e run
+// would attach a json reporter to the same path and clobber it (fresh-review r1 #2).
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^npm_|^INIT_CWD$|^NODE_ENV$|^AI_KIT_DIR$|^PORT$|^HOST$|^DATABASE_URL$|^TEST_MYSQL_URL$|^DB_|^HEAVY_RUN_JSON$/.test(k)))
 env.CI = '1'
 
 // The kit gate is one of the host's heavy suites (GATE.md tiers): on a machine with heavy-run on PATH the whole run
