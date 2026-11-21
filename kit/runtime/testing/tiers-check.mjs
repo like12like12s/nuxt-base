@@ -28,6 +28,7 @@
 
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 const CLOSED_TAGS = ['@smoke', '@layout', '@quarantine']
 const DEFAULT_SPEC_GLOBS = ['tests/e2e/**/*.spec.ts', 'tests/e2e/**/*.test.ts', 'test/e2e/**/*.spec.ts', 'test/e2e/**/*.test.ts']
@@ -280,7 +281,7 @@ async function loadCatalog(root, rel) {
   let loaded
   if (abs.endsWith('.json')) loaded = JSON.parse(readFileSync(abs, 'utf8'))
   else {
-    loaded = await import(`file://${abs}`)
+    loaded = await import(pathToFileURL(abs).href)
     loaded = loaded.default ?? loaded.FLOWS ?? loaded.flows ?? loaded
   }
   const flows = Array.isArray(loaded) ? loaded : loaded?.flows ?? loaded?.personas?.flatMap((p) => p.flows ?? []) ?? null
