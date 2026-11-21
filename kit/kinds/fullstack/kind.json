@@ -21,7 +21,9 @@
           "dev:api": "npm run dev --prefix api",
           "dev:ui": "npm run dev --prefix ui",
           "build": "npm run build --prefix api && npm run build --prefix ui",
-          "gate": "npm run gate --prefix api && npm run gate --prefix ui"
+          "test:smoke": "npm run test:smoke --prefix ui",
+          "gate": "npm run gate --prefix api && npm run gate --prefix ui",
+          "gate:full": "npm run gate:full --prefix api && npm run gate:full --prefix ui"
         }
       },
       "files": [

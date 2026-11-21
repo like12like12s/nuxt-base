@@ -21,7 +21,8 @@
           "typecheck": "tsc --noEmit",
           "lint": "oxlint --deny-warnings",
           "test": "vitest run",
-          "gate": "npm run typecheck && npm run lint && npm run test"
+          "gate": "npm run typecheck && npm run lint && npm run test",
+          "gate:full": "npm run gate && npm run build"
         },
         "dependencies": {
           "@hono/node-server": "^2.1.8",

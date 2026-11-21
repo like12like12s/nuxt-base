@@ -18,6 +18,23 @@ scaffold update --show ui/tests/unit/auth-bridge.spec.ts > ui/tests/unit/auth-br
 
 ## 0.4.0 -> next
 
+- Test tiers (GATE.md, t1444) — `package.json` scripts are app-owned, so add them by hand:
+  - kind `nuxt-app` (and the `ui/` part of fullstack): `"test:smoke": "npm run build && playwright test --grep @smoke"`
+    and `"gate:full": "npm run gate && npm run test:e2e"`; tag your main-flow e2e tests `@smoke` (the generated
+    skeleton in `tests/e2e/app.spec.ts` already carries the tags — take it over with
+    `scaffold update --show ui/tests/e2e/app.spec.ts > ui/tests/e2e/app.spec.ts` if you never edited it).
+  - kind `api`: `"gate:full": "npm run gate && npm run build"`.
+  - fullstack root: `"test:smoke": "npm run test:smoke --prefix ui"` and
+    `"gate:full": "npm run gate:full --prefix api && npm run gate:full --prefix ui"`.
+  - `gate` itself is unchanged (typecheck + lint + unit — no build, no e2e, as before).
+- `ui/tests/tiers.json` (new, app-owned — a file you do not have yet): take it from
+  `scaffold update --show ui/tests/tiers.json > ui/tests/tiers.json` (single-part kinds: without the `ui/` prefix),
+  then extend `map` with your own pages/components as you add e2e specs.
+- `ui/scripts/lib/heavy-run-global-setup.mjs` (locked, copied by `scaffold update`) and
+  `ui/playwright.config.ts` (app-owned): wire the queue helper into the config — globalSetup + globalTeardown +
+  `reporters: [...heavyRunReporters(), ['list']]` + `workers: Number(process.env.HEAVY_RUN_WORKERS) || undefined`
+  (see `scaffold update --show ui/playwright.config.ts`). Every full playwright run then holds a slot in the
+  host-wide heavy-run queue; exit 75 = queue full = not run.
 - `api/tests/app.spec.ts` (kind `api` and fullstack): the query-string marker in the request-log test is now
   `zz-secret-zz` instead of `abc`. The assertion `expect(...).not.toContain(...)` runs on a log line that also
   carries the random hex trace id — an `abc` marker matched a trace id containing `abc` (~0.7% of ids) and made the

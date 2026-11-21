@@ -262,7 +262,7 @@ describe('fullstack --with api,db', () => {
     expect(r.json.backup).toEqual([{ id: 'demo-app-db', service: 'demo-app-api', engine: 'sqlite', envKey: 'DATABASE_URL', path: 'api/data/demo-app.db' }])
     expect(r.json.locked).toContain('api/src/kit/testing/test-db.ts')
     expect(r.json.locked).toContain('ui/tests/kit/e2e.ts')
-    expect(r.json.locked.filter((p: string) => p.startsWith('ui/'))).toEqual(['ui/app/utils/api-error.ts', 'ui/tests/kit/e2e.ts'])
+    expect(r.json.locked.filter((p: string) => p.startsWith('ui/'))).toEqual(['ui/app/utils/api-error.ts', 'ui/scripts/lib/heavy-run-global-setup.mjs', 'ui/tests/kit/e2e.ts'])
   })
 })
 
@@ -275,7 +275,7 @@ describe('testkit on its own', () => {
 
   it('kind nuxt-app: the playwright helpers', () => {
     const { dir, r } = scaffold(['--kind', 'nuxt-app', '--with', 'testkit'])
-    expect(r.json.locked).toEqual(['scripts/gate-ci.mjs', 'tests/kit/e2e.ts'])
+    expect(r.json.locked).toEqual(['scripts/gate-ci.mjs', 'scripts/lib/heavy-run-global-setup.mjs', 'tests/kit/e2e.ts'])
     expect(read(dir, 'tests/kit/e2e.ts')).toContain('export async function stubApi')
     expect(read(dir, '.memory/docs/guides/usage.md')).toContain('captureErrors(page)')
   })

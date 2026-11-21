@@ -121,6 +121,63 @@ describe('new — composition', () => {
   })
 })
 
+// Test tiers per GATE.md (git-hooks): gate never builds or opens a browser; test:smoke is the authored @smoke
+// suite; gate:full is everything. The heavy-run queue helper is a locked file every playwright run goes through.
+describe('new — test tiers', () => {
+  it('nuxt-app: gate = typecheck + lint + unit, smoke/full scripts, @smoke-tagged skeleton, tiers.json, queue helper wired and locked', () => {
+    const { dir } = scaffold(['--kind', 'nuxt-app'])
+    const pkg = JSON.parse(read(dir, 'package.json'))
+    expect(pkg.scripts.gate).toBe('npm run typecheck && npm run lint && npm run test') // no build, no playwright
+    expect(pkg.scripts['test:smoke']).toBe('npm run build && playwright test --grep @smoke')
+    expect(pkg.scripts['gate:full']).toBe('npm run gate && npm run test:e2e')
+    expect(JSON.parse(read(dir, 'tests/tiers.json'))).toEqual({
+      version: 1,
+      exclusive: true, // the e2e port is fixed per project — checkouts of one repo serialize
+      map: { 'app/**': ['tests/e2e/app.spec.ts'] },
+    })
+    expect(read(dir, 'tests/e2e/app.spec.ts')).toMatch(/tag: \['@smoke'\]/)
+    // the queue helper: wired into the config, and locked (hash in .scaffold.json = the file as written)
+    const config = read(dir, 'playwright.config.ts')
+    expect(config).toContain("from './scripts/lib/heavy-run-global-setup.mjs'")
+    expect(config).toContain('globalSetup: heavyGlobalSetup')
+    expect(config).toContain('workers: Number(process.env.HEAVY_RUN_WORKERS) || undefined')
+    const manifest = JSON.parse(read(dir, '.scaffold.json'))
+    expect(Object.keys(manifest.locked)).toContain('scripts/lib/heavy-run-global-setup.mjs')
+    const hashes = snapshot(dir)
+    expect(manifest.locked['scripts/lib/heavy-run-global-setup.mjs']).toBe(`sha256:${hashes['scripts/lib/heavy-run-global-setup.mjs']}`)
+    expect(read(dir, 'scripts/lib/heavy-run-global-setup.mjs')).toContain('Queue full')
+  })
+
+  it('fullstack: root wires smoke to the ui part and gate:full to both; ui tiers.json paths are repo-root-relative', () => {
+    const { dir } = scaffold(['--kind', 'fullstack', '--with', 'api'])
+    const root = JSON.parse(read(dir, 'package.json'))
+    expect(root.scripts['test:smoke']).toBe('npm run test:smoke --prefix ui')
+    expect(root.scripts['gate:full']).toBe('npm run gate:full --prefix api && npm run gate:full --prefix ui')
+    expect(JSON.parse(read(dir, 'ui/tests/tiers.json'))).toEqual({
+      version: 1,
+      exclusive: true,
+      map: {
+        'ui/app/**': ['ui/tests/e2e/app.spec.ts'],
+        'ui/server/**': ['ui/tests/e2e/app.spec.ts'],
+      },
+    })
+    expect(read(dir, 'ui/playwright.config.ts')).toContain('globalSetup: heavyGlobalSetup')
+    expect(read(dir, 'ui/tests/e2e/app.spec.ts')).toMatch(/tag: \['@smoke'\]/)
+    // the api part has no tiers file: no e2e there, the tier split is the gate / gate:full scripts alone
+    expect(existsSync(join(dir, 'api/tests/tiers.json'))).toBe(false)
+    expect(JSON.parse(read(dir, 'api/package.json')).scripts['gate:full']).toBe('npm run gate && npm run build')
+  })
+
+  it('api alone: no smoke, no tiers.json — gate / gate:full is the whole tier split', () => {
+    const { dir } = scaffold(['--kind', 'api'])
+    const pkg = JSON.parse(read(dir, 'package.json'))
+    expect(pkg.scripts['gate:full']).toBe('npm run gate && npm run build')
+    expect(pkg.scripts['test:smoke']).toBeUndefined()
+    expect(pkg.scripts['test:e2e']).toBeUndefined()
+    expect(existsSync(join(dir, 'tests/tiers.json'))).toBe(false)
+  })
+})
+
 // Finding #17: every project served its e2e build on 3999, so two kit projects could not run e2e at the same time.
 describe('new — e2e port', () => {
   const e2e = (args: string[]) => /Number\(process\.env\.E2E_PORT\) \|\| (\d+)/.exec(read(scaffold(args).dir, args.includes('fullstack') ? 'ui/playwright.config.ts' : 'playwright.config.ts'))![1]

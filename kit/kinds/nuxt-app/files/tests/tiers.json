@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "exclusive": true,
+  // @kit:if kind:fullstack
+  "map": {
+    "ui/app/**": ["ui/tests/e2e/app.spec.ts"],
+    "ui/server/**": ["ui/tests/e2e/app.spec.ts"]
+  }
+  // @kit:else
+  "map": {
+    "app/**": ["tests/e2e/app.spec.ts"]
+  }
+  // @kit:end
+}

@@ -324,14 +324,18 @@ written for an agent working inside the project, where it lands as `.memory/docs
 ```
 nuxt-app    Nuxt 4 SPA extending the layer by git tag · DESIGN.md · vitest (nuxt env) · playwright e2e against the
             built app that fails on any pageerror / console error, served on the project's own e2e port (UI port
-            + 10000; `E2E_PORT` overrides) so two projects can run e2e at once · gate = typecheck + unit · security headers on
-            every page (nosniff, no framing, referrer policy) through `routeRules`
+            + 10000; `E2E_PORT` overrides) so two projects can run e2e at once · test tiers (GATE.md): gate =
+            typecheck + lint + unit (no build, no browser) / test:smoke = build + the @smoke e2e / gate:full =
+            gate + all e2e · every playwright run queues host-wide through the locked heavy-run helper (globalSetup;
+            exit 75 = queue full = not run) · tests/tiers.json (exclusive) maps changed paths to specs · security
+            headers on every page (nosniff, no framing, referrer policy) through `routeRules`
 api         hono on Node (tsx dev, tsc build -> dist/) · src/config.ts = zod env schema: a missing key stops the boot
             and is named, no value is ever printed · /health/live · one JSON log line per request · graceful shutdown
-            · src/app.ts creates the app · src/kit/** = locked runtime · `--with api,db` replaces the plain app
-            with the API standard below
+            · src/app.ts creates the app · src/kit/** = locked runtime · gate = typecheck + lint + unit,
+            gate:full adds the build (no e2e — the tier split is scripts alone) · `--with api,db` replaces the plain
+            app with the API standard below
 fullstack   api/ + ui/ in one repo, each with its own package.json and lockfile; the UI server proxies /api/** to
-            the API (API_URL); the root package.json wires install / gate / build to both
+            the API (API_URL); the root package.json wires install / gate / test:smoke (ui) / gate:full to both
 ```
 
 Every kind gets `.gitignore` (first), `README.md`, `.memory/docs/{brief,context,guides,changelog}` (the brief lives
@@ -483,7 +487,9 @@ A preset on a kind it does not support (`cf-pages` on `api` / `fullstack`) is ex
 ```bash
 npm run gate        # fast: lint of kit/{runtime,lib,bin} + the kit's unit tests in the repo's vitest suite — no installs
 npm run gate:ci     # gate + gitleaks + npm audit — what .github/workflows/gate.yml runs (the ci-github template, dogfooded)
-npm run gate:kit    # slow: every combo in tests/combos.mjs -> temp dir -> npm install -> npm run gate -> build -> run it
+npm run gate:kit    # slow: every combo in tests/combos.mjs -> temp dir -> npm install -> npm run gate -> build -> run it;
+                    # the whole run holds one slot in the host-wide heavy-run queue (self-wrapped; exit 75 = queue
+                    # full = not run, retry — HEAVY_RUN_HELD keeps nested runs out of the queue)
 node kit/tests/kit-gate.mjs --only fullstack --keep     # one family, keep the temp dirs
 ```
 

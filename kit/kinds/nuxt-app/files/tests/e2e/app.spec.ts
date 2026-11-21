@@ -8,7 +8,7 @@ function watchErrors(page: Page) {
   return errors
 }
 
-test('home renders with the layer styles and no JS errors', async ({ page }) => {
+test('home renders with the layer styles and no JS errors', { tag: ['@smoke'] }, async ({ page }) => {
   const errors = watchErrors(page)
   // @kit:if auth
   // the app asks the API who is signed in; e2e runs without a backend
@@ -34,7 +34,7 @@ test('home renders with the layer styles and no JS errors', async ({ page }) => 
   expect(errors).toEqual([])
 })
 
-test('unknown routes show the layer error page', async ({ page }) => {
+test('unknown routes show the layer error page', { tag: ['@smoke'] }, async ({ page }) => {
   // @kit:if auth
   await page.route('**/api/v1/me', (route) => route.fulfill({ json: { data: { subject: 'e2e', name: 'E2E User', email: null, roles: [], kind: 'user' } } }))
   // @kit:end
@@ -50,7 +50,7 @@ test('unknown routes show the layer error page', async ({ page }) => {
 })
 
 // The UI server answers every page with the baseline security headers (nuxt.config.ts, routeRules).
-test('pages carry the security headers', async ({ request }) => {
+test('pages carry the security headers', { tag: ['@smoke'] }, async ({ request }) => {
   for (const path of ['/', '/does-not-exist']) {
     const headers = (await request.get(path)).headers()
     expect(headers['x-content-type-options'], path).toBe('nosniff')
